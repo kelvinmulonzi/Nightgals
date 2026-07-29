@@ -1,0 +1,281 @@
+package com.nightgals.media;
+
+import com.nightgals.billing.EntitlementService;
+import com.nightgals.common.ApiException;
+import com.nightgals.common.PageResponse;
+import com.nightgals.earnings.EarningsService;
+import com.nightgals.media.dto.MediaResponse;
+import com.nightgals.media.dto.MediaUpdateRequest;
+import com.nightgals.storage.StorageService;
+import com.nightgals.storage.StoredFile;
+import com.nightgals.storage.UploadValidator;
+import com.nightgals.user.User;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Photos and video on a member's profile.
+ *
+ * <p>The gate that defines this product lives in {@link #requireApproved}: nobody
+ * uploads anything until a human has matched their face to a government ID.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class MediaService {
+
+    private static final int MAX_PHOTOS = 9;
+    private static final int MAX_VIDEOS = 3;
+
+    private final MediaRepository mediaRepository;
+    private final StorageService storageService;
+    private final UploadValidator uploadValidator;
+    private final EntitlementService entitlementService;
+    private final EarningsService earningsService;
+
+    @Transactional
+    public MediaResponse upload(User user, MediaType type, MultipartFile file,
+                                String caption, ContentTier tier) {
+        requireApproved(user);
+        requireQuota(user, type);
+
+        if (type == MediaType.PHOTO) {
+            uploadValidator.validateImage(file);
+        } else {
+            uploadValidator.validateVideo(file);
+        }
+
+        StoredFile stored = storageService.store(file, "media/" + user.getId());
+        boolean firstPhoto = type == MediaType.PHOTO
+                && mediaRepository.countByUserIdAndType(user.getId(), MediaType.PHOTO) == 0;
+
+        // The first photo becomes the profile picture, and the profile picture is
+        // always free - otherwise a creator's card would have no image and nobody
+        // would have anything to judge them on.
+        ContentTier resolvedTier = firstPhoto ? ContentTier.FREE
+                : (tier == null ? ContentTier.EXCLUSIVE : tier);
+
+        MediaAsset asset = MediaAsset.builder()
+                .user(user)
+                .type(type)
+                .storageKey(stored.storageKey())
+                .contentType(stored.contentType())
+                .sizeBytes(stored.sizeBytes())
+                .checksumSha256(stored.checksumSha256())
+                .caption(caption)
+                .tier(resolvedTier)
+                .position((int) mediaRepository.countByUserIdAndType(user.getId(), type))
+                .primary(firstPhoto)
+                // Published straight away: passing KYC is what earns the right to
+                // post, so there is no second gate.
+                .status(MediaStatus.APPROVED)
+                .build();
+
+        log.info("Media {} ({}) published by verified creator {}", type, resolvedTier, user.getId());
+        return MediaResponse.of(mediaRepository.save(asset));
+    }
+
+    @Transactional(readOnly = true)
+    public List<MediaResponse> listOwn(UUID userId) {
+        return mediaRepository.findByUserIdOrderByPositionAscCreatedAtAsc(userId).stream()
+                .map(MediaResponse::of)
+                .toList();
+    }
+
+    /**
+     * Another member's gallery: moderator-approved items only, and only as far as
+     * the viewer has paid.
+     *
+     * <p>Items the creator marked {@code FREE} come back in full; {@code EXCLUSIVE}
+     * ones are returned locked - present in the list, with no URL - so a client can
+     * render blurred placeholders and an honest count of what unlocking reveals.
+     *
+     * <p>Public: {@code viewer} is null for anonymous callers, who are never
+     * entitled and therefore always see the preview-only view.
+     */
+    @Transactional(readOnly = true)
+    public List<MediaResponse> listPublic(UUID targetUserId, User viewer) {
+        List<MediaAsset> approved = mediaRepository
+                .findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(targetUserId, MediaStatus.APPROVED);
+
+        if (entitlementService.canViewPremium(viewer, targetUserId)) {
+            // A subscriber consuming this creator's paid content earns them a share
+            // of that subscriber's payment for the period.
+            if (approved.stream().anyMatch(a -> !a.isFree())) {
+                earningsService.recordPremiumView(viewer, targetUserId);
+            }
+            return approved.stream().map(MediaResponse::of).toList();
+        }
+
+        return approved.stream()
+                .map(asset -> asset.isFree() ? MediaResponse.of(asset) : MediaResponse.locked(asset))
+                .toList();
+    }
+
+    @Transactional
+    public MediaResponse update(User user, UUID mediaId, MediaUpdateRequest request) {
+        MediaAsset asset = requireOwned(user, mediaId);
+
+        if (request.caption() != null) {
+            asset.setCaption(request.caption());
+        }
+        if (request.position() != null) {
+            asset.setPosition(request.position());
+        }
+        if (request.tier() != null) {
+            if (asset.isPrimary() && request.tier() == ContentTier.EXCLUSIVE) {
+                throw ApiException.badRequest("primary_must_be_free",
+                        "Your profile picture has to stay free. Make another photo primary first.");
+            }
+            asset.setTier(request.tier());
+        }
+        if (Boolean.TRUE.equals(request.primary())) {
+            if (asset.getType() != MediaType.PHOTO) {
+                throw ApiException.badRequest("not_a_photo", "Only a photo can be the profile picture");
+            }
+            mediaRepository.clearPrimary(user.getId());
+            mediaRepository.flush();
+            asset.setPrimary(true);
+            // Becoming the profile picture makes it free by definition.
+            asset.setTier(ContentTier.FREE);
+        }
+
+        return MediaResponse.of(asset);
+    }
+
+    @Transactional
+    public void delete(User user, UUID mediaId) {
+        MediaAsset asset = requireOwned(user, mediaId);
+        storageService.delete(asset.getStorageKey());
+        mediaRepository.delete(asset);
+        log.info("Media {} deleted by {}", mediaId, user.getId());
+    }
+
+    /**
+     * Streams a media file.
+     *
+     * <p>Owners and staff see anything. Everyone else - including anonymous
+     * callers, since free URLs are public - gets published items only, and only
+     * {@code FREE} ones unless they have paid.
+     *
+     * @param viewer the caller, or null when anonymous
+     */
+    @Transactional(readOnly = true)
+    public MediaDownload download(UUID mediaId, User viewer) {
+        MediaAsset asset = mediaRepository.findById(mediaId)
+                .orElseThrow(() -> ApiException.notFound("Media"));
+
+        boolean owner = viewer != null && asset.getUser().getId().equals(viewer.getId());
+        boolean staff = viewer != null && viewer.isStaff();
+
+        if (!owner && !staff && !asset.isVisibleToOthers()) {
+            throw ApiException.notFound("Media");
+        }
+
+        if (!owner && !staff && !asset.isFree()
+                && !entitlementService.canViewPremium(viewer, asset.getUser().getId())) {
+            // Anonymous callers get 401 rather than 402: signing in is the next
+            // step for them, not paying.
+            throw viewer == null
+                    ? ApiException.unauthorized("Sign in to see more of this member")
+                    : ApiException.paymentRequired("Unlock this member to see their photos and video");
+        }
+
+        return new MediaDownload(storageService.load(asset.getStorageKey()), asset.getContentType());
+    }
+
+    // ------------------------------------------------------------ moderation
+
+    /**
+     * Recently posted media, newest first.
+     *
+     * <p>Nothing is waiting on staff - this is for spot-checking what creators
+     * have published, not a queue that must be worked.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<MediaResponse> recentMedia(Pageable pageable) {
+        return PageResponse.from(mediaRepository.findRecent(pageable), MediaResponse::of);
+    }
+
+    @Transactional(readOnly = true)
+    public long takenDownCount() {
+        return mediaRepository.countByStatus(MediaStatus.REJECTED);
+    }
+
+    /**
+     * Removes a published item. The reason is shown to the creator on their own
+     * media listing, so they know what happened and why.
+     */
+    @Transactional
+    public MediaResponse takeDown(UUID mediaId, String reason) {
+        MediaAsset asset = mediaRepository.findById(mediaId)
+                .orElseThrow(() -> ApiException.notFound("Media"));
+        if (reason == null || reason.isBlank()) {
+            throw ApiException.badRequest("reason_required",
+                    "Say why this is being removed - the creator is shown the reason");
+        }
+
+        asset.setStatus(MediaStatus.REJECTED);
+        asset.setRejectionReason(reason.trim());
+
+        log.info("Media {} taken down: {}", mediaId, reason);
+        return MediaResponse.of(asset);
+    }
+
+    /** Puts a taken-down item back. */
+    @Transactional
+    public MediaResponse restore(UUID mediaId) {
+        MediaAsset asset = mediaRepository.findById(mediaId)
+                .orElseThrow(() -> ApiException.notFound("Media"));
+
+        asset.setStatus(MediaStatus.APPROVED);
+        asset.setRejectionReason(null);
+
+        log.info("Media {} restored", mediaId);
+        return MediaResponse.of(asset);
+    }
+
+    // ------------------------------------------------------------ internals
+
+    /** The verification gate. */
+    private void requireApproved(User user) {
+        if (!user.isApproved()) {
+            throw ApiException.forbidden("verification_required", switch (user.getVerificationStatus()) {
+                case UNVERIFIED -> "Verify your identity before posting. Start at POST /api/v1/me/kyc.";
+                case PENDING_REVIEW -> "Your identity documents are still being reviewed.";
+                case REJECTED -> "Your verification was not successful. Submit new documents to try again.";
+                case APPROVED -> "";
+            });
+        }
+    }
+
+    private void requireQuota(User user, MediaType type) {
+        long existing = mediaRepository.countByUserIdAndType(user.getId(), type);
+        int limit = type == MediaType.PHOTO ? MAX_PHOTOS : MAX_VIDEOS;
+        if (existing >= limit) {
+            throw ApiException.conflict("quota_exceeded",
+                    "You can have at most " + limit + " " + type.name().toLowerCase() + " items");
+        }
+    }
+
+    private MediaAsset requireOwned(User user, UUID mediaId) {
+        MediaAsset asset = mediaRepository.findById(mediaId)
+                .orElseThrow(() -> ApiException.notFound("Media"));
+        if (!asset.getUser().getId().equals(user.getId())) {
+            // 404 rather than 403: a stranger should not learn the id exists.
+            throw ApiException.notFound("Media");
+        }
+        return asset;
+    }
+
+    public record MediaDownload(Resource resource, String contentType) {
+    }
+}

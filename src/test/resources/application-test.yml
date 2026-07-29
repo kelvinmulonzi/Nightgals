@@ -1,0 +1,56 @@
+spring:
+  docker:
+    compose:
+      enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+nightgals:
+  jwt:
+    secret: test-only-secret-key-that-is-long-enough-for-hs256-abcdefgh
+    issuer: nightgals
+    access-token-ttl: PT30M
+    refresh-token-ttl: P30D
+  app:
+    cors-allowed-origins:
+      - http://localhost:3000
+    minimum-age: 18
+    document-hash-pepper: test-pepper
+  monetization:
+    enabled: true
+    currency: KES
+    profile-unlock:
+      price-minor: 10000
+      duration: P30D
+    plans:
+      MONTHLY:
+        label: 1 month
+        price-minor: 90000
+        duration: P30D
+  earnings:
+    commission-percent: 30
+    # Zero hold so tests can exercise payouts without waiting.
+    hold-period: PT0S
+    minimum-payout-minor: 1000
+    release-cron: "0 0 3 * * *"
+
+  username:
+    change-cooldown: P30D
+
+  storage:
+    root-path: ${java.io.tmpdir}/nightgals-test-storage
+    max-image-size: 10MB
+    max-video-size: 100MB
+    allowed-image-types:
+      - image/jpeg
+      - image/png
+    allowed-video-types:
+      - video/mp4
+    download-url-ttl: PT15M
+    kyc-retention: P90D
+    purge-cron: "0 0 3 * * *"
+
+logging:
+  level:
+    org.testcontainers: WARN

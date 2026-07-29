@@ -1,0 +1,30 @@
+package com.nightgals.auth.dto;
+
+import com.nightgals.user.AccountType;
+import com.nightgals.user.Role;
+import com.nightgals.user.VerificationStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
+
+import java.util.UUID;
+
+@Schema(description = "Issued tokens plus the caller's current standing")
+public record AuthResponse(
+        @Schema(description = "Send as: Authorization: Bearer <accessToken>")
+        String accessToken,
+        @Schema(description = "Use with POST /api/v1/auth/refresh. Store securely; it is shown once.")
+        String refreshToken,
+        @Schema(example = "Bearer") String tokenType,
+        @Schema(description = "Access token lifetime in seconds", example = "1800") long expiresIn,
+        UUID userId,
+        @Schema(description = "The caller's public handle. Other members see this, never their real name.",
+                example = "VelvetFalcon482")
+        String username,
+
+        @Schema(description = "VIEWER or CREATOR - decides what the client shows next")
+        AccountType accountType,
+
+        Role role,
+        @Schema(description = "APPROVED is required before media upload") VerificationStatus verificationStatus,
+        @Schema(description = "False until the user completes their profile. Creators only.")
+        boolean profileComplete) {
+}

@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: 'postgres:17-alpine'
+    container_name: nightgals-postgres
+    environment:
+      POSTGRES_DB: nightgals
+      POSTGRES_USER: nightgals
+      POSTGRES_PASSWORD: nightgals
+    ports:
+      - '5433:5432'
+    volumes:
+      - nightgals-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U nightgals -d nightgals']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  nightgals-pgdata:

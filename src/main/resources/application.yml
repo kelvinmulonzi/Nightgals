@@ -1,0 +1,156 @@
+spring:
+  application:
+    name: Nightgals
+
+  # Spring Boot starts compose.yaml automatically on `./mvnw spring-boot:run`
+  # and wires the datasource to it. Set enabled=false to point at an external DB.
+  docker:
+    compose:
+      enabled: true
+      lifecycle-management: start_and_stop
+      file: compose.yaml
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/nightgals}
+    username: ${DB_USERNAME:nightgals}
+    password: ${DB_PASSWORD:nightgals}
+    hikari:
+      maximum-pool-size: 10
+      pool-name: nightgals-pool
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 25
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  jackson:
+    default-property-inclusion: non_null
+
+  threads:
+    virtual:
+      enabled: true
+
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 110MB
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+
+nightgals:
+  jwt:
+    # Override in every real environment. Must be >= 32 characters for HS256.
+    secret: ${JWT_SECRET:change-me-in-production-this-is-a-dev-only-secret-key-0123456789}
+    issuer: nightgals
+    access-token-ttl: PT30M
+    refresh-token-ttl: P30D
+
+  app:
+    cors-allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:5173}
+    minimum-age: 18
+    # Mixed into the document-number hash. Rotating this invalidates duplicate
+    # detection for existing rows, so set it once, per environment, and keep it.
+    document-hash-pepper: ${DOCUMENT_HASH_PEPPER:dev-only-pepper-change-me}
+
+  monetization:
+    # Master switch. false makes everything free and every paywall check pass.
+    enabled: ${MONETIZATION_ENABLED:true}
+    currency: KES
+    # Shown while no payment API is integrated. {amount} and {reference} are substituted.
+    manual-payment-instructions: >-
+      Send {amount} to the Nightgals till and quote reference {reference}.
+      Access is granted once our team confirms receipt.
+    profile-unlock:
+      # Minor units: 10000 = KES 100.00
+      price-minor: 10000
+      duration: P30D
+    plans:
+      WEEKLY:
+        label: 1 week
+        price-minor: 30000
+        duration: P7D
+      MONTHLY:
+        label: 1 month
+        price-minor: 90000
+        duration: P30D
+      QUARTERLY:
+        label: 3 months
+        price-minor: 240000
+        duration: P90D
+
+  earnings:
+    # The platform's cut of every payment. 30 means creators keep 70%.
+    commission-percent: 30
+    # New earnings stay unpayable for this long, so a refund can reverse them.
+    hold-period: P7D
+    # Smallest payout that will be processed. 100000 = KES 1000.00
+    minimum-payout-minor: 100000
+    # Hourly sweep releasing earnings whose hold has elapsed.
+    release-cron: "0 0 * * * *"
+
+  username:
+    # How long a member must wait between handle changes.
+    change-cooldown: P30D
+
+  bootstrap:
+    # Set BOOTSTRAP_ADMIN_PASSWORD to create the first admin on an empty database.
+    # Nothing is created while this is blank.
+    admin-email: ${BOOTSTRAP_ADMIN_EMAIL:admin@nightgals.local}
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+
+  storage:
+    root-path: ${STORAGE_ROOT:./var/storage}
+    max-image-size: 10MB
+    max-video-size: 100MB
+    allowed-image-types:
+      - image/jpeg
+      - image/png
+      - image/webp
+      - image/heic
+    allowed-video-types:
+      - video/mp4
+      - video/quicktime
+      - video/webm
+    download-url-ttl: PT15M
+    # How long identity documents are kept after a decision is recorded.
+    kyc-retention: P90D
+    purge-cron: "0 30 3 * * *"
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.nightgals: DEBUG
+    org.springframework.security: INFO
