@@ -2,8 +2,13 @@ package com.nightgals.auth;
 
 import com.nightgals.auth.dto.AuthResponse;
 import com.nightgals.auth.dto.LoginRequest;
+import com.nightgals.auth.dto.LoginResponse;
+import com.nightgals.auth.dto.OtpChallengeResponse;
+import com.nightgals.auth.dto.OtpVerifyRequest;
 import com.nightgals.auth.dto.RefreshRequest;
 import com.nightgals.auth.dto.RegisterRequest;
+import com.nightgals.auth.dto.RegisterResponse;
+import com.nightgals.auth.dto.ResendRequest;
 import com.nightgals.common.ErrorResponse;
 import com.nightgals.user.AuthUser;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,6 +17,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -22,7 +28,17 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "1. Authentication", description = "Register, sign in, and manage sessions")
+@Tag(name = "1. Authentication", description = """
+        Register, sign in, and manage sessions.
+
+        **Signing in takes two calls.** `POST /login` checks the password and emails a
+        six-digit code; `POST /otp/verify` exchanges that code for tokens. A password on
+        its own is never enough, so a leaked or reused one does not cost anybody their
+        account.
+
+        **Registering takes one.** The account is created and signed in immediately - the
+        confirmation code is sent alongside, but nothing waits on it.
+        """)
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
@@ -33,41 +49,134 @@ public class AuthController {
     @Operation(
             summary = "Register a new account",
             description = """
-                    Creates the account and signs the user straight in.
+                    Creates the account and signs the user straight in. The response carries
+                    working tokens, so the app is usable before the confirmation email lands.
 
                     **`accountType` decides everything that follows.** It defaults to `VIEWER`.
 
                     **Viewer** - somebody who wants to watch. Nothing further is asked of them:
-                    no profile, no date of birth, no identity documents. They browse, unlock a
-                    creator or subscribe, and watch. `nextStep` comes back as `BROWSE`.
+                    no profile, no date of birth, no identity documents. They browse, pay for
+                    whichever creator they want to see, and watch. `nextStep` comes back as
+                    `BROWSE`.
 
                     **Creator** - somebody who wants to post and earn. The path is:
                     1. `PUT /api/v1/me/profile` - display details and date of birth
                     2. `POST /api/v1/me/kyc` - submit an ID or passport
                     3. Wait for an administrator to approve
-                    4. `POST /api/v1/me/media/photos` - unlocked once approved
+                    4. `POST /api/v1/billing/creator-packages` - buy BRONZE, SILVER or GOLD
+                    5. `POST /api/v1/me/media/photos` - unlocked by the package
 
                     A viewer who later wants to post calls `POST /api/v1/me/become-creator`;
                     they keep their handle, their purchases and their history.
                     """,
             security = @SecurityRequirement(name = ""))
-    @ApiResponse(responseCode = "201", description = "Account created")
+    @ApiResponse(responseCode = "201", description = "Account created and signed in")
     @ApiResponse(responseCode = "409", description = "Email already registered",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    public ResponseEntity<RegisterResponse> register(@Valid @RequestBody RegisterRequest request,
+                                                     HttpServletRequest http) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(authService.register(request, clientIp(http)));
     }
 
-    @Operation(summary = "Sign in", security = @SecurityRequirement(name = ""))
-    @ApiResponse(responseCode = "200", description = "Signed in")
+    @Operation(
+            summary = "Step 1 of signing in: check the password, send a code",
+            description = """
+                    A correct password does not return tokens. It returns a challenge, and a
+                    six-digit code goes to the address on the account.
+
+                    Read `otpRequired` to decide what to do with the response:
+
+                    * `true` - show a code box, then send the code and `challengeId` to
+                      `POST /auth/otp/verify`. `maskedEmail` tells the user which inbox to open.
+                    * `false` - codes are switched off in this environment and `auth` already
+                      holds the tokens. Nothing else to do.
+
+                    A wrong email and a wrong password give the same `401`, so this cannot be
+                    used to find out who has an account.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "Code sent, or signed in when codes are off")
     @ApiResponse(responseCode = "401", description = "Invalid email or password",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "403", description = "Account suspended or closed",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Too many codes requested for this account",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "The code could not be emailed - retry",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/login")
-    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request);
+    public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+        return authService.login(request, clientIp(http));
+    }
+
+    @Operation(
+            summary = "Step 2 of signing in: exchange the emailed code for tokens",
+            description = """
+                    Codes are single-use and short-lived, and a challenge is burned after a few
+                    wrong guesses - the error says how many are left.
+
+                    Succeeding here also marks the address confirmed, since reading the code
+                    proves control of the inbox.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "Signed in")
+    @ApiResponse(responseCode = "401", description = "Wrong, expired, or already-used code",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/otp/verify")
+    public AuthResponse verifyOtp(@Valid @RequestBody OtpVerifyRequest request) {
+        return authService.verifyLoginCode(request);
+    }
+
+    @Operation(
+            summary = "Send a fresh code",
+            description = """
+                    Replaces the code on an outstanding challenge - the previous one stops
+                    working immediately, and both the expiry and the remaining guesses reset.
+
+                    Rate limited: a short cooldown between sends and a cap per challenge, so
+                    this cannot be pointed at somebody's inbox.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "A new code is on its way")
+    @ApiResponse(responseCode = "401", description = "That challenge is no longer valid",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Asked too soon, or too many times",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/otp/resend")
+    public OtpChallengeResponse resendOtp(@Valid @RequestBody ResendRequest request) {
+        return authService.resendCode(request.challengeId());
+    }
+
+    @Operation(
+            summary = "Confirm the email address on a new account",
+            description = """
+                    Answers the `emailVerification` challenge from `POST /auth/register`.
+
+                    Optional, and nothing is gated on it - a viewer can browse and pay without
+                    ever confirming. It is what makes account recovery possible, and it happens
+                    by itself the first time somebody signs in with a code.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "204", description = "Address confirmed")
+    @ApiResponse(responseCode = "401", description = "Wrong, expired, or already-used code",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/email/verify")
+    public ResponseEntity<Void> verifyEmail(@Valid @RequestBody OtpVerifyRequest request) {
+        authService.verifyEmail(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Ask for a new confirmation code",
+            description = "For a signed-in user whose address is still unconfirmed.")
+    @ApiResponse(responseCode = "200", description = "A code is on its way")
+    @ApiResponse(responseCode = "409", description = "Already confirmed",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/email/request-code")
+    public OtpChallengeResponse requestEmailCode(@AuthenticationPrincipal AuthUser principal,
+                                                 HttpServletRequest http) {
+        return authService.requestEmailVerification(principal.user(), clientIp(http));
     }
 
     @Operation(
@@ -97,5 +206,23 @@ public class AuthController {
     public ResponseEntity<Void> logoutEverywhere(@AuthenticationPrincipal AuthUser principal) {
         authService.logoutEverywhere(principal.user());
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Best-effort client address, recorded on challenges for abuse investigation.
+     *
+     * <p>{@code X-Forwarded-For} is trusted only as far as this is deployed behind
+     * a proxy that sets it. Nothing is authorised on the result, so a spoofed value
+     * costs nothing.
+     */
+    private static String clientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        String candidate = forwarded != null && !forwarded.isBlank()
+                ? forwarded.split(",")[0].trim()
+                : request.getRemoteAddr();
+        if (candidate == null) {
+            return null;
+        }
+        return candidate.length() > 45 ? candidate.substring(0, 45) : candidate;
     }
 }

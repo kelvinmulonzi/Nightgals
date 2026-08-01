@@ -30,6 +30,11 @@ public class SecurityConfig {
     private static final String[] PUBLIC_PATHS = {
             "/api/v1/auth/register",
             "/api/v1/auth/login",
+            // Answering a challenge is how a session is obtained, so it cannot
+            // itself require one.
+            "/api/v1/auth/otp/verify",
+            "/api/v1/auth/otp/resend",
+            "/api/v1/auth/email/verify",
             "/api/v1/auth/refresh",
             "/api/v1/auth/logout",
             "/api/v1/usernames/suggestions",
@@ -57,6 +62,10 @@ public class SecurityConfig {
                         // Public shop window: browse members, read a profile, see the
                         // gallery (locked past the free preview) and who is live. Reads
                         // only - and never the paid content itself.
+                        // The creator price list, so somebody deciding whether to
+                        // sign up can see what publishing costs first. GET only -
+                        // the POST on the same path is the buy endpoint.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/billing/creator-packages").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/profile").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/media").permitAll()

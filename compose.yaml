@@ -16,5 +16,47 @@ services:
       timeout: 5s
       retries: 10
 
+  # Object storage for photos, video and identity documents.
+  #
+  # MinIO speaks the S3 protocol, so this exercises the same code path that runs
+  # against AWS in production - only the endpoint and the credentials differ.
+  # Deploying means pointing S3_BUCKET at a real bucket and dropping S3_ENDPOINT.
+  #
+  # Console at http://localhost:9001 (nightgals / nightgals-secret).
+  minio:
+    image: 'minio/minio:latest'
+    container_name: nightgals-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: nightgals
+      MINIO_ROOT_PASSWORD: nightgals-secret
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - nightgals-minio:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Creates the bucket once, then exits. The app can create it itself
+  # (auto-create-bucket), but doing it here means a fresh clone has somewhere to
+  # write before the first request rather than at it.
+  minio-init:
+    image: 'minio/mc:latest'
+    container_name: nightgals-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 nightgals nightgals-secret &&
+      mc mb --ignore-existing local/nightgals-media &&
+      echo 'bucket nightgals-media ready'
+      "
+
 volumes:
   nightgals-pgdata:
+  nightgals-minio:

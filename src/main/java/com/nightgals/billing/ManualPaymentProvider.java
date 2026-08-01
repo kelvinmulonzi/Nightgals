@@ -2,7 +2,7 @@ package com.nightgals.billing;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -13,11 +13,13 @@ import org.springframework.stereotype.Component;
  * arrived - which is how a till-number or bank-transfer flow works anyway, so
  * this is usable in production, not only a placeholder.
  *
- * <p>Drops out automatically as soon as another PaymentProvider bean exists.
+ * <p>Selected with {@code nightgals.monetization.provider=manual}. The default is
+ * {@link AutoSettlePaymentProvider}, which needs no human at all - see there for
+ * why that is only acceptable before launch.
  */
 @Slf4j
 @Component
-@ConditionalOnMissingBean(ignored = ManualPaymentProvider.class, value = PaymentProvider.class)
+@ConditionalOnProperty(name = "nightgals.monetization.provider", havingValue = "manual")
 public class ManualPaymentProvider implements PaymentProvider {
 
     @Value("${nightgals.monetization.manual-payment-instructions:}")

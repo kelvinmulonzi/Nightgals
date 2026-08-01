@@ -64,6 +64,16 @@ public class Profile extends BaseEntity {
     @Builder.Default
     private boolean discoverable = true;
 
+    /**
+     * What a viewer pays, in minor units, to see everything this creator has
+     * posted.
+     *
+     * <p>Null means "whatever the platform default is", so a creator who never
+     * opens the pricing screen still has a working price.
+     */
+    @Column(name = "unlock_price_minor")
+    private Long unlockPriceMinor;
+
     public int getAge() {
         return Period.between(dateOfBirth, LocalDate.now()).getYears();
     }

@@ -32,7 +32,17 @@ public record MemberCardResponse(
         @Schema(description = "True if this member is broadcasting right now") boolean liveNow,
 
         @Schema(description = "True when the caller can already see everything - no payment needed")
-        boolean unlocked) {
+        boolean unlocked,
+
+        @Schema(description = """
+                What unlocking this creator costs, in minor units. Her price if she set
+                one, the platform default otherwise - so the card can show a real number
+                without a second call.
+                """, example = "15000")
+        long unlockPriceMinor,
+
+        @Schema(example = "150.00") String unlockPriceDisplay,
+        @Schema(example = "KES") String currency) {
 
     public static MemberCardResponse of(Profile profile,
                                         java.util.List<String> freePhotoUrls,
@@ -40,7 +50,9 @@ public record MemberCardResponse(
                                         int lockedPhotoCount,
                                         int lockedVideoCount,
                                         boolean liveNow,
-                                        boolean unlocked) {
+                                        boolean unlocked,
+                                        long unlockPriceMinor,
+                                        String currency) {
         return new MemberCardResponse(
                 profile.getUser().getId(),
                 profile.getUser().getUsername(),
@@ -55,6 +67,9 @@ public record MemberCardResponse(
                 lockedPhotoCount,
                 lockedVideoCount,
                 liveNow,
-                unlocked);
+                unlocked,
+                unlockPriceMinor,
+                String.format("%.2f", unlockPriceMinor / 100.0),
+                currency);
     }
 }

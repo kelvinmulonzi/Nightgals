@@ -20,13 +20,45 @@ public record MonetizationProperties(
         /** ISO 4217, e.g. KES. */
         String currency,
 
-        /** Price and lifetime of unlocking a single profile. */
+        /**
+         * Which {@link com.nightgals.billing.PaymentProvider} is wired in.
+         *
+         * <p>{@code auto} completes every purchase instantly and collects nothing -
+         * the happy path, for demonstrating the product without a human confirming
+         * each payment. {@code manual} leaves purchases PENDING for an
+         * administrator to settle once money actually arrives.
+         *
+         * <p>Neither takes payment. A real integration adds a third value.
+         */
+        String provider,
+
+        /** Default price and lifetime of unlocking a single profile. */
         ProfileUnlock profileUnlock,
 
         /** Subscription plans, keyed by the code clients send. */
         Map<String, Plan> plans) {
 
-    public record ProfileUnlock(long priceMinor, Duration duration) {
+    /**
+     * Unlocking one creator.
+     *
+     * <p>{@code priceMinor} is only a default. A creator who has set her own price
+     * overrides it, within the bounds below - the floor stops a race to the bottom
+     * that would make the commission worthless, the ceiling stops somebody pricing
+     * themselves out by mistyping an amount.
+     */
+    public record ProfileUnlock(
+            long priceMinor,
+            Duration duration,
+            Long minPriceMinor,
+            Long maxPriceMinor) {
+
+        public long floor() {
+            return minPriceMinor == null ? 0L : minPriceMinor;
+        }
+
+        public long ceiling() {
+            return maxPriceMinor == null ? Long.MAX_VALUE : maxPriceMinor;
+        }
     }
 
     public record Plan(String label, long priceMinor, Duration duration) {

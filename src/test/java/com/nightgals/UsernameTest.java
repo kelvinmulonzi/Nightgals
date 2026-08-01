@@ -43,19 +43,19 @@ class UsernameTest {
     @Test
     @DisplayName("Registration assigns a handle automatically")
     void handleAssignedAtRegistration() {
-        var response = authService.register(new RegisterRequest(email(), "correct-horse-9", AccountType.CREATOR));
+        var response = authService.register(new RegisterRequest(email(), "correct-horse-9", AccountType.CREATOR), null);
 
-        assertThat(response.username()).isNotBlank();
-        assertThat(response.username()).matches("^[A-Za-z][A-Za-z0-9_]{2,29}$");
+        assertThat(response.auth().username()).isNotBlank();
+        assertThat(response.auth().username()).matches("^[A-Za-z][A-Za-z0-9_]{2,29}$");
     }
 
     @Test
     @DisplayName("Handles are unique across accounts")
     void handlesAreUnique() {
-        var first = authService.register(new RegisterRequest(email(), "correct-horse-9", AccountType.CREATOR));
-        var second = authService.register(new RegisterRequest(email(), "correct-horse-9", AccountType.CREATOR));
+        var first = authService.register(new RegisterRequest(email(), "correct-horse-9", AccountType.CREATOR), null);
+        var second = authService.register(new RegisterRequest(email(), "correct-horse-9", AccountType.CREATOR), null);
 
-        assertThat(first.username()).isNotEqualTo(second.username());
+        assertThat(first.auth().username()).isNotEqualTo(second.auth().username());
     }
 
     @Test
@@ -64,7 +64,7 @@ class UsernameTest {
         User owner = register();
         profileService.createOrUpdate(owner, new ProfileRequest(
                 "Amina", "Afrobeats and rooftop bars", LocalDate.of(1998, 4, 12),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
 
         // An owner-or-staff view keeps everything.
         var ownView = profileService.getOwn(owner.getId());
@@ -92,7 +92,7 @@ class UsernameTest {
         User user = register();
         var profile = profileService.createOrUpdate(user, new ProfileRequest(
                 null, null, LocalDate.of(1996, 3, 3),
-                Gender.PREFER_NOT_TO_SAY, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
 
         assertThat(profile.displayName()).isNull();
         assertThat(profile.username()).isNotBlank();
@@ -175,7 +175,7 @@ class UsernameTest {
 
     private User register() {
         String email = email();
-        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR));
+        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR), null);
         return userRepository.findByEmailIgnoreCase(email).orElseThrow();
     }
 

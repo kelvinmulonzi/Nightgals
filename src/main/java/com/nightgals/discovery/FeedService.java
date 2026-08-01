@@ -2,6 +2,7 @@ package com.nightgals.discovery;
 
 import com.nightgals.billing.EntitlementService;
 import com.nightgals.common.PageResponse;
+import com.nightgals.config.MonetizationProperties;
 import com.nightgals.discovery.dto.MemberCardResponse;
 import com.nightgals.live.LiveSessionRepository;
 import com.nightgals.media.MediaAsset;
@@ -42,6 +43,7 @@ public class FeedService {
     private final MediaRepository mediaRepository;
     private final LiveSessionRepository liveSessionRepository;
     private final EntitlementService entitlementService;
+    private final MonetizationProperties monetization;
 
     /**
      * @param viewer the caller, or null when anonymous - the feed is public so
@@ -90,8 +92,13 @@ public class FeedService {
                 }
             }
 
+            // Already loaded with the profile, so no extra query per card.
+            Long ownPrice = profile.getUnlockPriceMinor();
+            long price = ownPrice != null ? ownPrice : monetization.profileUnlock().priceMinor();
+
             return MemberCardResponse.of(profile, freePhotoUrls, freeVideoUrls,
-                    lockedPhotos, lockedVideos, liveHosts.contains(userId), isUnlocked);
+                    lockedPhotos, lockedVideos, liveHosts.contains(userId), isUnlocked,
+                    price, monetization.currency());
         });
     }
 

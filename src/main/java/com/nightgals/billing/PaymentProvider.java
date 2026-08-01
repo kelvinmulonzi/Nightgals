@@ -25,6 +25,18 @@ public interface PaymentProvider {
     PaymentInstruction startPayment(Purchase purchase);
 
     /**
+     * Whether a purchase is paid the instant it is created.
+     *
+     * <p>False for every real provider: money arrives out of band, so settlement
+     * is a later event. True only for {@link AutoSettlePaymentProvider}, which
+     * exists so the product can be demonstrated end to end without a human
+     * confirming every payment.
+     */
+    default boolean settlesImmediately() {
+        return false;
+    }
+
+    /**
      * What the client needs to complete the payment.
      *
      * @param reference      the provider's id for this payment, if it has one yet
@@ -40,11 +52,17 @@ public interface PaymentProvider {
             /** The provider has pushed a prompt to the user's phone; poll the purchase. */
             PROMPT_ON_PHONE,
             /** Pay out of band; a human will confirm. */
-            MANUAL
+            MANUAL,
+            /** Already paid by the time this response was written. Nothing to do, nothing to poll. */
+            NONE
         }
 
         public static PaymentInstruction manual(String instructions) {
             return new PaymentInstruction(null, Action.MANUAL, null, instructions);
+        }
+
+        public static PaymentInstruction settled(String reference) {
+            return new PaymentInstruction(reference, Action.NONE, null, null);
         }
     }
 }

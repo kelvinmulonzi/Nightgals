@@ -5,8 +5,60 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+  # Never reached: nightgals.mail.enabled is false below, so nothing is sent.
+  # The host still has to parse, because JavaMailSender is autoconfigured.
+  mail:
+    host: localhost
+    port: 3025
 
 nightgals:
+  mail:
+    # Tests must not open SMTP connections. Codes go to the log instead.
+    enabled: false
+    from: test@nightgals.local
+    from-name: Nightgals
+    app-base-url: http://localhost:5173
+    support-email: test@nightgals.local
+
+  otp:
+    # Sign-in stays a single call in tests. The OTP path has its own test that
+    # drives OtpService directly.
+    login-required: false
+    length: 6
+    ttl: PT10M
+    max-attempts: 5
+    max-resends: 3
+    resend-cooldown: PT0S
+    max-challenges-per-hour: 100
+    purge-cron: "0 15 4 * * *"
+
+  # Publishing stays free, so the existing media tests keep exercising media
+  # rules rather than package rules. CreatorPackageTest turns it on itself.
+  creator-packages:
+    enabled: false
+    packages:
+      BRONZE:
+        label: Bronze
+        tagline: Photos only
+        price-minor: 50000
+        duration: P30D
+        max-photos: 12
+        max-videos: 0
+      SILVER:
+        label: Silver
+        tagline: Video only
+        price-minor: 100000
+        duration: P30D
+        max-photos: 0
+        max-videos: 6
+      GOLD:
+        label: Gold
+        tagline: Photos and video
+        price-minor: 150000
+        duration: P30D
+        max-photos: 40
+        max-videos: 20
+
   jwt:
     secret: test-only-secret-key-that-is-long-enough-for-hs256-abcdefgh
     issuer: nightgals
@@ -20,9 +72,14 @@ nightgals:
   monetization:
     enabled: true
     currency: KES
+    # The suite drives settlement explicitly, so purchases must stay PENDING
+    # until it says otherwise. AutoSettleTest overrides this for itself.
+    provider: manual
     profile-unlock:
       price-minor: 10000
       duration: P30D
+      min-price-minor: 5000
+      max-price-minor: 500000
     plans:
       MONTHLY:
         label: 1 month
@@ -39,6 +96,8 @@ nightgals:
     change-cooldown: P30D
 
   storage:
+    # Filesystem, so the suite needs no object store.
+    provider: local
     root-path: ${java.io.tmpdir}/nightgals-test-storage
     max-image-size: 10MB
     max-video-size: 100MB

@@ -11,20 +11,23 @@ Two things make it different from a normal dating app:
    generated handle like `VelvetFalcon482` — never by the legal name on their
    ID. The platform knows exactly who you are; the app does not tell anybody
    else.
-3. **Scrolling is free, seeing the person is paid.** A feed card is free to any
-   verified member. Photos beyond the preview, all video, and live sessions sit
-   behind a paywall.
+3. **Scrolling is free, seeing the person is paid.** A feed card is free. What a
+   creator marked exclusive sits behind a paywall, at the price *she* sets.
+4. **Money moves in both directions.** Viewers pay creators for access. Creators
+   pay the platform for the right to publish, via a bronze/silver/gold package.
+5. **A password never signs anyone in on its own.** Every sign-in is completed
+   with a six-digit code emailed to the account.
 
 - Java 21, Spring Boot 4.1
 - PostgreSQL in Docker, schema owned by Flyway
-- JWT auth with rotating refresh tokens
-- Uploads on the local filesystem, behind a `StorageService` interface
+- JWT auth with rotating refresh tokens, plus a one-time code on every sign-in
+- Uploads in object storage — AWS S3 in production, MinIO locally, same code path
 - Full Swagger/OpenAPI documentation
 
 ## Run it
 
 ```bash
-docker compose up -d                                  # Postgres on localhost:5433
+docker compose up -d      # Postgres on :5433, MinIO on :9000 (console :9001)
 BOOTSTRAP_ADMIN_PASSWORD='ChangeMe123!' ./mvnw spring-boot:run
 ```
 
@@ -38,8 +41,43 @@ who can approve the first member. It is only used once; later starts ignore it.
 > was already using 5432 on this machine. Change it in `compose.yaml` if you like.
 
 ```bash
-./mvnw test          # 64 tests, spins up a throwaway Postgres via Testcontainers
+./mvnw test          # 95 tests, spins up a throwaway Postgres via Testcontainers
 ```
+
+Sign-in codes are emailed, so a machine with no outbound SMTP needs
+`MAIL_ENABLED=false`, which writes each code to the log instead. **If mail is
+broken, nobody can sign in** — that is the point of the second factor, but it
+means a mail outage is a total outage. `OTP_LOGIN_REQUIRED=false` is the
+break-glass. Gmail returning `535 5.7.8 BadCredentials` means the app password is
+wrong, revoked, or belongs to an account without 2-Step Verification enabled —
+see `.env.example`. `docker compose`
+also brings up MinIO and creates the `nightgals-media` bucket; set
+`STORAGE_PROVIDER=local` to write to the filesystem instead.
+
+## Signing in takes two calls
+
+A correct password does not produce a session. It produces a *challenge*, and a
+six-digit code goes to the address on the account:
+
+```
+POST /api/v1/auth/login       -> { otpRequired: true, challengeId, maskedEmail }
+POST /api/v1/auth/otp/verify  -> tokens
+```
+
+Codes are single-use, expire in ten minutes, and a challenge burns after five
+wrong guesses. Only the SHA-256 is stored, so a database dump contains no usable
+codes. Opening challenges is rate-limited per account, which is what stops
+somebody who already has a password from simply retrying until one is guessable.
+
+Set `OTP_LOGIN_REQUIRED=false` to fall back to password-only sign-in — for local
+work, or as a break-glass measure when the mail provider is down. The response
+shape does not change: `otpRequired` comes back `false` and `auth` holds the
+tokens.
+
+**Registering still takes one call.** The account is created and signed in
+immediately; a confirmation code is sent alongside but nothing waits on it.
+Somebody who arrived to look at one creator is looking at her seconds after
+submitting the form.
 
 ## Signing in vs. being verified
 
@@ -163,51 +201,100 @@ free views earn nothing.
 
 ## Money
 
-Free, to any verified member:
+Money moves in two directions, and they are worth keeping straight.
+
+### Viewers pay creators
+
+Free:
 
 - the browse feed and every card on it — handle, age, city, vibe, bio
-- the first `freePreviewPhotos` photos on a profile (default 1)
+- everything the creator herself marked `FREE`; that is her shop window
 - the counts of what is locked, so the paywall is honest rather than a mystery
 
-Paid:
+Paid: everything she marked `EXCLUSIVE`, and her live sessions.
 
-- the rest of somebody's photos
-- all of their video
-- the playback URL for their live sessions
+**One payment, one creator, all of her content.** There is no photo tier and no
+video tier — a viewer picks a person, not a menu, and every extra choice on a
+payment screen is somewhere to hesitate.
 
-Two routes, both resolved by the same check in `EntitlementService`:
+**Each creator sets her own price.** `PUT /me/profile` takes `unlockPriceMinor`;
+leaving it null sells her at the platform default. The price is bounded by
+`min-price-minor` and `max-price-minor` — the floor keeps the commission worth
+collecting, the ceiling catches a mistyped extra zero. Her price rides along on
+her feed card and her profile, so no client has to ask twice.
 
-| | What it buys | Default price |
+| | What it buys | Price |
 |---|---|---|
-| Profile unlock | one member, 30 days | KES 100 |
-| Subscription | every member, for the plan's term | KES 300 / 900 / 2400 (1w / 1m / 3m) |
+| Profile unlock | one creator, everything she posted, 30 days | hers, default KES 100 |
+| Subscription | every creator, for the plan's term | KES 300 / 900 / 2400 (1w / 1m / 3m) |
 
 ```
 GET  /api/v1/billing/plans              prices (open, no auth)
-POST /api/v1/billing/unlocks/{userId}   unlock one member
+POST /api/v1/billing/unlocks/{userId}   unlock one creator, at her price
 POST /api/v1/billing/subscriptions      subscribe
 GET  /api/v1/billing/entitlements       what the caller can already see
 GET  /api/v1/billing/purchases          payment history
 ```
 
+### Creators pay the platform
+
+Publishing needs a package. Passing KYC says *who you are*; the package says
+*what you may post*:
+
+| | Covers | Allowance | Price |
+|---|---|---|---|
+| `BRONZE` | photos only | 12 photos | KES 500 / month |
+| `SILVER` | video only | 6 videos | KES 1000 / month |
+| `GOLD` | photos and video | 40 photos, 20 videos | KES 1500 / month |
+
+```
+GET  /api/v1/billing/creator-packages        the catalogue (open, no auth)
+GET  /api/v1/billing/creator-packages/mine   package held + allowance left
+POST /api/v1/billing/creator-packages        buy one
+```
+
+An upload with no package returns **402**; one the package does not cover
+returns 402 naming the upgrade; one past the allowance returns **409**. The three
+are kept distinct because each has a different next step for the creator.
+
+Allowances count what is *currently posted*, so deleting frees a slot. Renewing
+the same package extends the row already in play rather than inserting a second
+one starting in the future — which would leave a creator who had just paid being
+shown the old expiry date. Switching packages does insert a row, and the
+longer-running cover wins, so an upgrade applies at once and a downgrade never
+claws back time already paid for.
+
+Limits and prices are configuration (`nightgals.creator-packages`).
+`enabled: false` makes publishing free and restores the old flat 9-photo /
+3-video allowance.
+
 Locked media is still *listed* — `locked: true` with a null `url` — so a client
 can render blurred placeholders and a truthful count. Fetching a locked file
 returns **402 Payment Required**, which is the client's cue to open the paywall.
 
-Prices, durations, plans and `free-preview-photos` are all configuration
-(`nightgals.monetization`). `enabled: false` turns the whole paywall off and
-makes every entitlement check pass — useful for a launch period.
+Prices, durations and plans are all configuration (`nightgals.monetization`).
+`enabled: false` turns the whole paywall off and makes every entitlement check
+pass — useful for a launch period.
 
 ### No payment provider is integrated yet
 
-That is deliberate, and the seam is clean. A purchase is created `PENDING`; the
-configured `PaymentProvider` says how to pay; access is granted only when
-`BillingService.settle()` runs. Nothing else in the codebase knows how money
-arrives.
+That is deliberate, and the seam is clean. A purchase is created; the configured
+`PaymentProvider` says how to pay; access is granted in exactly one place.
+Nothing else in the codebase knows how money arrives. Pick one with
+`nightgals.monetization.provider`:
 
-The default `ManualPaymentProvider` does not fake a payment. It returns
-`action: MANUAL` with instructions, and an administrator settles the purchase
-once money actually lands:
+| | Behaviour | Admin involved? |
+|---|---|---|
+| `auto` **(default)** | Purchase is `COMPLETED` before the response is written. `action: NONE`. | No |
+| `manual` | Purchase stays `PENDING` with instructions. | Yes |
+
+**`auto` collects nothing.** It exists so the product can be walked end to end —
+sign up, buy a package, publish, unlock, watch — without a human confirming every
+payment. It logs a banner at every startup saying so. Running it in front of real
+users gives away every paid thing on the platform.
+
+`manual` is a real till-number workflow, not a placeholder: money lands on a till
+or by transfer, somebody reconciles it, and confirms it here.
 
 ```
 GET  /api/v1/admin/billing/purchases/pending
@@ -215,11 +302,11 @@ POST /api/v1/admin/billing/purchases/{id}/settle?providerReference=MPESA-XYZ
 POST /api/v1/admin/billing/grants?viewerId=…&targetId=…&duration=P30D
 ```
 
-That is a real till-number workflow, so it is usable in production, not just a
-placeholder. When you wire in M-Pesa Daraja, write one class implementing
-`PaymentProvider` — STK push in `startPayment`, callback calls `settle()`. It
-drops in automatically (`ManualPaymentProvider` is `@ConditionalOnMissingBean`)
-and **no access-control code changes**. `settle()` is idempotent and
+When you wire in M-Pesa Daraja, write one class implementing `PaymentProvider` —
+STK push in `startPayment`, callback calls `settle()` — and name it in that
+property. **No access-control code changes.** Both routes to `COMPLETED` share
+one private `grant()`, so an auto-settled purchase and a webhook-settled one
+cannot drift on what they hand out. `settle()` is idempotent and
 `provider_reference` is unique per provider, so a replayed webhook cannot grant
 twice.
 
@@ -344,12 +431,14 @@ POST /api/v1/me/kyc/documents/{kind}    one call per required image
 POST /api/v1/me/kyc/submit            → PENDING_REVIEW
      ... an admin reviews ...
 POST /api/v1/admin/kyc/{id}/review    → APPROVED or REJECTED
+POST /api/v1/billing/creator-packages   bronze, silver or gold
 POST /api/v1/me/media/photos            now unlocked
 ```
 
-`GET /api/v1/me` returns a `nextStep` field (`CREATE_PROFILE`, `SUBMIT_KYC`,
-`AWAIT_REVIEW`, `RESUBMIT_KYC`, `DONE`) so a client can decide what screen to
-show with one call.
+`GET /api/v1/me` returns a `nextStep` field (`BROWSE`, `CREATE_PROFILE`,
+`SUBMIT_KYC`, `AWAIT_REVIEW`, `RESUBMIT_KYC`, `DONE`) so a client can decide what
+screen to show with one call. **Viewers are always `BROWSE`** — none of the above
+applies to them.
 
 Which images are required depends on the document type:
 
@@ -359,8 +448,9 @@ Which images are required depends on the document type:
 | `PASSPORT` | `PASSPORT_PAGE`, `SELFIE` |
 | `DRIVERS_LICENSE` | `ID_FRONT`, `ID_BACK`, `SELFIE` |
 
-**KYC is the only gate on posting.** Once a creator is approved their uploads
-publish immediately — there is no review queue and nothing waits on staff. A
+**KYC and the package are the two gates on posting.** Once a creator is approved
+and holds a package, her uploads publish immediately — there is no review queue
+and nothing waits on staff. A
 moderator can remove an item afterwards with
 `POST /api/v1/admin/media/{id}/takedown?reason=…`, which hides it from everyone
 but its owner and shows the creator why.
@@ -376,7 +466,12 @@ the decisions are deliberate:
   opened on the same ID; the reviewer reads the real number off the image.
 - **Document images are never publicly reachable.** No public URL, no presigned
   link — they stream through an authenticated endpoint restricted to
-  `MODERATOR`/`ADMIN`, with `Cache-Control: no-store`.
+  `MODERATOR`/`ADMIN`, with `Cache-Control: no-store`. This is why the S3 store
+  hands out no presigned URLs even though the SDK is right there: a presigned URL
+  works for anyone holding it until it expires, so it cannot re-check a paywall
+  or an audit rule on each request the way the streaming endpoint does.
+- **One-time codes are stored only as SHA-256**, like refresh tokens, and are
+  swept once they expire.
 - **Every document view is audited.** `kyc_access_log` records which staff
   member opened which document, when, and from which IP. The log write is in the
   same transaction as the read, so an image cannot be served without it.
@@ -400,17 +495,19 @@ controller.
 src/main/java/com/nightgals/
 ├── config/     security, OpenAPI, typed properties, admin bootstrap
 ├── common/     base entity, error envelope, exception handler, hashing
-├── storage/    StorageService + local implementation + upload validation
+├── storage/    StorageService + S3 and local implementations + upload validation
+├── mail/       branded HTML email: one-time codes, receipts, notifications
 ├── user/       User, roles, verification status, usernames, /me
 ├── auth/       JWT, refresh tokens, register/login
+│   └── otp/    one-time sign-in codes: issue, resend, consume, purge
 ├── profile/    optional nickname, DOB, city, vibe
 ├── kyc/        submissions, documents, review queue, audit log, retention job
 ├── media/      photo and video upload (KYC-gated) + takedown
 ├── discovery/  the browse feed and its cards
-├── billing/    purchases, subscriptions, unlocks, entitlements, payment provider
+├── billing/    purchases, subscriptions, unlocks, creator packages, entitlements
 ├── earnings/   creator ledger, payout requests, admin payout queue
 └── live/       broadcast session metadata
-src/main/resources/db/migration/   V1__init.sql … V7__account_types.sql
+src/main/resources/db/migration/   V1__init.sql … V10__creator_pricing_and_gender.sql
 ```
 
 `ddl-auto` is `validate`, so the app refuses to start if the entities and the
@@ -429,16 +526,38 @@ All of it in `application.yml`, overridable by environment variable. See
 | `DOCUMENT_HASH_PEPPER` | Salts the document-number hash. Set once per environment — rotating it breaks duplicate detection on existing rows. |
 | `nightgals.username.change-cooldown` | Wait between handle changes (default `P30D`) |
 | `MONETIZATION_ENABLED` | `false` makes everything free and disables every paywall |
-| `nightgals.monetization.*` | Currency, prices, plans, manual payment instructions |
+| `PAYMENT_PROVIDER` | `auto` (default) settles every purchase instantly and collects nothing; `manual` needs an admin |
+| `nightgals.monetization.*` | Currency, default prices, plans, per-creator price bounds |
+| `CREATOR_PACKAGES_ENABLED` | `false` makes publishing free and restores the flat 9-photo / 3-video allowance |
+| `nightgals.creator-packages.*` | Bronze/silver/gold prices and allowances |
+| `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` | SMTP. Gmail needs an app password. |
+| `MAIL_ENABLED` | `false` logs one-time codes instead of sending them. Never correct in production. |
+| `APP_BASE_URL` | Where links inside emails point |
+| `OTP_LOGIN_REQUIRED` | `false` drops back to password-only sign-in |
 | `nightgals.earnings.commission-percent` | Platform's cut (default 30) |
 | `nightgals.earnings.hold-period` | How long earnings stay unpayable (default `P7D`) |
 | `nightgals.earnings.minimum-payout-minor` | Smallest payout processed (default KES 1000) |
 | `BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | First admin, on an empty database only |
-| `STORAGE_ROOT` | Upload directory (default `./var/storage`) |
+| `STORAGE_PROVIDER` | `s3` (default) or `local` |
+| `S3_BUCKET`, `S3_REGION` | Object storage target |
+| `S3_ENDPOINT` | MinIO's address locally. **Leave blank on AWS** so the SDK resolves the regional endpoint. |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | **Leave blank on AWS** and use an instance or task role instead. |
+| `S3_PATH_STYLE` | Must be `true` for MinIO; harmless on AWS |
+| `STORAGE_ROOT` | Upload directory, when `STORAGE_PROVIDER=local` |
 | `CORS_ORIGINS` | Comma-separated allowed origins |
 
-Limits: images 10MB (JPEG/PNG/WebP/HEIC), videos 100MB (MP4/QuickTime/WebM),
-9 photos and 3 videos per member.
+Limits: images 10MB (JPEG/PNG/WebP/HEIC), videos 100MB (MP4/QuickTime/WebM).
+Item counts come from the creator's package.
+
+### Deploying to S3
+
+The local MinIO container and production AWS speak the same protocol, so the same
+`S3StorageService` runs against both — deploying means pointing `S3_BUCKET` at a
+real bucket and *removing* `S3_ENDPOINT`, `S3_ACCESS_KEY` and `S3_SECRET_KEY` so
+the SDK falls back to the instance role. Nothing else changes.
+
+The bucket should have public access blocked. Objects are never served directly:
+every read goes through the app so the paywall is re-checked on each request.
 
 ## Not built yet
 
@@ -458,14 +577,14 @@ invoice per period.
 
 Also worth doing before production:
 
-- **Swap local storage for object storage.** `StorageService` has one
-  implementation; adding an S3 one touches no callers. The filesystem does not
-  survive more than one app instance.
 - **Verify uploads properly.** Content types are client-supplied and only
   checked because it is cheap. Add magic-byte sniffing and a malware scan.
-- **Encrypt the upload directory at rest**, and keep it off any backup that
-  travels more widely than the database does.
-- **Rate-limit** `/auth/login`, `/usernames/suggestions` and the KYC endpoints.
-- **Email verification** — `emailVerified` exists on the user and is never set.
+- **Turn on bucket encryption at rest**, and keep KYC objects under a lifecycle
+  rule that matches the retention job rather than trusting the job alone.
+- **Move off Gmail SMTP.** It is fine for development and will throttle or flag
+  real volume. SES or Postmark; the change is `spring.mail.*` and nothing else.
+- **Rate-limit `/auth/login` by IP.** Codes are rate-limited per account, which
+  bounds guessing against one victim, but nothing yet bounds an attacker
+  spraying one password across many accounts.
 - Consider an automated KYC vendor (Smile ID handles Kenyan IDs well) in front
   of the manual queue, keeping human review as the fallback.

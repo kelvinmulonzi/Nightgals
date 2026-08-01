@@ -4,6 +4,7 @@ import com.nightgals.common.ApiException;
 import com.nightgals.common.Hashing;
 import com.nightgals.config.StorageProperties;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -24,9 +25,14 @@ import java.util.UUID;
  * <p>Files are given random names - the original filename is attacker-controlled
  * and is never used to build a path. Every resolved path is checked to be inside
  * the configured root so a crafted key cannot escape via {@code ../}.
+ *
+ * <p>The default when {@code nightgals.storage.provider} is unset, which keeps a
+ * clone-and-run checkout working with no object store to point at.
+ * {@link S3StorageService} takes over when the provider is {@code s3}.
  */
 @Slf4j
 @Service
+@ConditionalOnProperty(name = "nightgals.storage.provider", havingValue = "local", matchIfMissing = true)
 public class LocalStorageService implements StorageService {
 
     private final Path root;

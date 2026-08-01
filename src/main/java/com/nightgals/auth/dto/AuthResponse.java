@@ -25,6 +25,14 @@ public record AuthResponse(
 
         Role role,
         @Schema(description = "APPROVED is required before media upload") VerificationStatus verificationStatus,
+
+        @Schema(description = """
+                Whether the address on the account has been confirmed. Signing in with
+                an emailed code confirms it, so this is true for anyone who has completed
+                a code-based sign-in.
+                """)
+        boolean emailVerified,
+
         @Schema(description = "False until the user completes their profile. Creators only.")
         boolean profileComplete) {
 }

@@ -1,5 +1,6 @@
 package com.nightgals.media;
 
+import com.nightgals.billing.CreatorPackageService;
 import com.nightgals.billing.EntitlementService;
 import com.nightgals.common.ApiException;
 import com.nightgals.common.PageResponse;
@@ -24,28 +25,29 @@ import java.util.UUID;
 /**
  * Photos and video on a member's profile.
  *
- * <p>The gate that defines this product lives in {@link #requireApproved}: nobody
- * uploads anything until a human has matched their face to a government ID.
+ * <p>Publishing passes two gates, in this order. {@link #requireApproved} asks who
+ * you are - nobody uploads anything until a human has matched their face to a
+ * government ID. {@link CreatorPackageService#requireCanPublish} then asks what
+ * you paid for: bronze covers photos, silver covers video, gold covers both, and
+ * each carries its own allowance.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class MediaService {
 
-    private static final int MAX_PHOTOS = 9;
-    private static final int MAX_VIDEOS = 3;
-
     private final MediaRepository mediaRepository;
     private final StorageService storageService;
     private final UploadValidator uploadValidator;
     private final EntitlementService entitlementService;
+    private final CreatorPackageService creatorPackageService;
     private final EarningsService earningsService;
 
     @Transactional
     public MediaResponse upload(User user, MediaType type, MultipartFile file,
                                 String caption, ContentTier tier) {
         requireApproved(user);
-        requireQuota(user, type);
+        creatorPackageService.requireCanPublish(user, type);
 
         if (type == MediaType.PHOTO) {
             uploadValidator.validateImage(file);
@@ -254,15 +256,6 @@ public class MediaService {
                 case REJECTED -> "Your verification was not successful. Submit new documents to try again.";
                 case APPROVED -> "";
             });
-        }
-    }
-
-    private void requireQuota(User user, MediaType type) {
-        long existing = mediaRepository.countByUserIdAndType(user.getId(), type);
-        int limit = type == MediaType.PHOTO ? MAX_PHOTOS : MAX_VIDEOS;
-        if (existing >= limit) {
-            throw ApiException.conflict("quota_exceeded",
-                    "You can have at most " + limit + " " + type.name().toLowerCase() + " items");
         }
     }
 

@@ -1,5 +1,6 @@
 package com.nightgals.billing.dto;
 
+import com.nightgals.billing.CreatorPackageCode;
 import com.nightgals.billing.Purchase;
 import com.nightgals.billing.PurchaseStatus;
 import com.nightgals.billing.PurchaseType;
@@ -14,6 +15,7 @@ public record PurchaseResponse(
         PurchaseType type,
         @Schema(description = "Who is being unlocked, for PROFILE_UNLOCK") UUID targetUserId,
         @Schema(description = "Which plan, for SUBSCRIPTION") String planCode,
+        @Schema(description = "Which package, for CREATOR_PACKAGE") CreatorPackageCode packageCode,
         long amountMinor,
         String priceDisplay,
         String currency,
@@ -29,6 +31,7 @@ public record PurchaseResponse(
                 p.getType(),
                 p.getTargetUser() == null ? null : p.getTargetUser().getId(),
                 p.getPlanCode(),
+                p.getPackageCode(),
                 p.getAmountMinor(),
                 String.format("%.2f", p.getAmountMinor() / 100.0),
                 p.getCurrency(),

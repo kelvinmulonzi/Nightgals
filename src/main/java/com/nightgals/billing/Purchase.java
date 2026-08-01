@@ -45,6 +45,11 @@ public class Purchase extends BaseEntity {
     @Column(name = "plan_code", length = 30)
     private String planCode;
 
+    /** Set for CREATOR_PACKAGE only: BRONZE, SILVER or GOLD. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "package_code", length = 30)
+    private CreatorPackageCode packageCode;
+
     @Column(name = "amount_minor", nullable = false)
     private long amountMinor;
 

@@ -6,8 +6,11 @@ import com.nightgals.billing.dto.PlanResponse;
 import com.nightgals.billing.dto.PurchaseResponse;
 import com.nightgals.common.ApiException;
 import com.nightgals.common.PageResponse;
+import com.nightgals.config.CreatorPackageProperties;
 import com.nightgals.config.MonetizationProperties;
 import com.nightgals.earnings.EarningsService;
+import com.nightgals.mail.EmailService;
+import com.nightgals.profile.ProfileRepository;
 import com.nightgals.user.User;
 import com.nightgals.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -39,9 +42,12 @@ public class BillingService {
     private final SubscriptionRepository subscriptionRepository;
     private final ProfileUnlockRepository unlockRepository;
     private final UserRepository userRepository;
+    private final ProfileRepository profileRepository;
     private final EntitlementService entitlementService;
+    private final CreatorPackageService creatorPackageService;
     private final PaymentProvider paymentProvider;
     private final EarningsService earningsService;
+    private final EmailService emailService;
     private final MonetizationProperties properties;
 
     // ---------------------------------------------------------------- catalogue
@@ -71,6 +77,20 @@ public class BillingService {
 
     // ---------------------------------------------------------------- buying
 
+    /**
+     * What it costs to unlock one creator.
+     *
+     * <p>Her own price if she has set one, otherwise the platform default. Read on
+     * every profile view and every card, so it is a single indexed lookup.
+     */
+    @Transactional(readOnly = true)
+    public long unlockPriceFor(UUID creatorId) {
+        return profileRepository.findByUserId(creatorId)
+                .map(profile -> profile.getUnlockPriceMinor())
+                .filter(java.util.Objects::nonNull)
+                .orElse(properties.profileUnlock().priceMinor());
+    }
+
     @Transactional
     public CheckoutResponse unlockProfile(User buyer, UUID targetUserId) {
         requireMonetisationOn();
@@ -88,17 +108,48 @@ public class BillingService {
                     "You already have access to this member's content");
         }
 
-        // Reuse a payment the buyer already started rather than creating a second one.
+        // Reuse a payment the buyer already started rather than creating a second
+        // one. The price is read once, when the purchase is opened: a creator who
+        // changes hers mid-checkout must not change what somebody is being charged.
         Purchase purchase = purchaseRepository.findPendingUnlock(buyer.getId(), targetUserId)
                 .orElseGet(() -> purchaseRepository.save(Purchase.builder()
                         .user(buyer)
                         .type(PurchaseType.PROFILE_UNLOCK)
                         .targetUser(target)
-                        .amountMinor(properties.profileUnlock().priceMinor())
+                        .amountMinor(unlockPriceFor(targetUserId))
                         .currency(properties.currency())
                         .status(PurchaseStatus.PENDING)
                         .provider(paymentProvider.name())
                         .build()));
+
+        return checkout(purchase);
+    }
+
+    /**
+     * A creator buying the right to publish.
+     *
+     * <p>Not gated on identity verification: letting somebody pay while their
+     * documents are in review means the package is live the moment they are
+     * approved, rather than adding a second wait to the end of the first.
+     */
+    @Transactional
+    public CheckoutResponse buyCreatorPackage(User creator, String packageCode) {
+        CreatorPackageCode code = creatorPackageService.parseCode(packageCode);
+        if (!creatorPackageService.packagesRequired()) {
+            throw ApiException.conflict("packages_disabled",
+                    "Posting is currently free - there is nothing to buy");
+        }
+        CreatorPackageProperties.Package config = creatorPackageService.configFor(code);
+
+        Purchase purchase = purchaseRepository.save(Purchase.builder()
+                .user(creator)
+                .type(PurchaseType.CREATOR_PACKAGE)
+                .packageCode(code)
+                .amountMinor(config.priceMinor())
+                .currency(properties.currency())
+                .status(PurchaseStatus.PENDING)
+                .provider(paymentProvider.name())
+                .build());
 
         return checkout(purchase);
     }
@@ -132,6 +183,14 @@ public class BillingService {
         if (instruction.reference() != null) {
             purchase.setProviderReference(instruction.reference());
         }
+
+        // A provider that settles on the spot has nothing to wait for, so access
+        // is granted before the response is written rather than leaving the client
+        // to poll a purchase that is never going to change.
+        if (paymentProvider.settlesImmediately()) {
+            grant(purchase, instruction.reference());
+        }
+
         return new CheckoutResponse(
                 PurchaseResponse.of(purchase),
                 instruction.action(),
@@ -160,6 +219,19 @@ public class BillingService {
                     "Purchase is " + purchase.getStatus() + " and cannot be settled");
         }
 
+        grant(purchase, providerReference);
+        return PurchaseResponse.of(purchase);
+    }
+
+    /**
+     * Everything that happens when a payment is confirmed.
+     *
+     * <p>Shared by the two ways a purchase reaches COMPLETED - an out-of-band
+     * settlement arriving at {@link #settle}, and a provider that settles the
+     * moment the purchase is created - so neither route can drift from the other
+     * on what access is granted or who gets paid.
+     */
+    private void grant(Purchase purchase, String providerReference) {
         purchase.setStatus(PurchaseStatus.COMPLETED);
         purchase.setCompletedAt(Instant.now());
         if (providerReference != null && !providerReference.isBlank()) {
@@ -173,12 +245,15 @@ public class BillingService {
                 // only known once the period's viewing is in, so it is attributed
                 // later by EarningsService.distributeSubscriptionRevenue.
                 earningsService.recordUnlockEarning(purchase);
+                notifyUnlock(purchase);
             }
             case SUBSCRIPTION -> grantSubscription(purchase);
+            // Money towards the platform, not towards a creator, so deliberately
+            // no earnings entry.
+            case CREATOR_PACKAGE -> grantCreatorPackage(purchase);
         }
 
         log.info("Purchase {} settled ({})", purchase.getId(), purchase.getType());
-        return PurchaseResponse.of(purchase);
     }
 
     @Transactional
@@ -209,6 +284,44 @@ public class BillingService {
                                 .expiresAt(expiresAt)
                                 .purchase(purchase)
                                 .build()));
+    }
+
+    private void grantCreatorPackage(Purchase purchase) {
+        CreatorPackage granted = creatorPackageService.grant(
+                purchase.getUser(), purchase.getPackageCode(), purchase);
+        CreatorPackageProperties.Package config =
+                creatorPackageService.configFor(purchase.getPackageCode());
+
+        emailService.sendPackageReceipt(
+                purchase.getUser().getEmail(),
+                purchase.getUser().getUsername(),
+                config.label(),
+                purchase.getCurrency() + " " + money(purchase.getAmountMinor()),
+                granted.getExpiresAt().atZone(java.time.ZoneOffset.UTC).toLocalDate().toString(),
+                config.maxPhotos(),
+                config.maxVideos());
+    }
+
+    /**
+     * Tells both sides that an unlock went through.
+     *
+     * <p>Best-effort by design - {@link EmailService} sends these asynchronously
+     * and swallows failures, because a receipt that does not arrive must never
+     * roll back a payment that did.
+     */
+    private void notifyUnlock(Purchase purchase) {
+        User buyer = purchase.getUser();
+        User creator = purchase.getTargetUser();
+        String amount = purchase.getCurrency() + " " + money(purchase.getAmountMinor());
+
+        String accessUntil = unlockRepository
+                .findByViewerIdAndTargetId(buyer.getId(), creator.getId())
+                .map(ProfileUnlock::getExpiresAt)
+                .map(expiry -> expiry.atZone(java.time.ZoneOffset.UTC).toLocalDate().toString())
+                .orElse("no expiry");
+
+        emailService.sendUnlockReceipt(buyer.getEmail(), creator.getUsername(), amount, accessUntil);
+        emailService.sendNewFanNotice(creator.getEmail(), creator.getUsername(), amount);
     }
 
     private void grantSubscription(Purchase purchase) {

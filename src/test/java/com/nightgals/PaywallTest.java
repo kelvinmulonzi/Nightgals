@@ -409,7 +409,7 @@ class PaywallTest {
 
     private User register() {
         String email = "user-" + UUID.randomUUID() + "@example.com";
-        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR));
+        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR), null);
         return userRepository.findByEmailIgnoreCase(email).orElseThrow();
     }
 
@@ -417,7 +417,7 @@ class PaywallTest {
         User user = register();
         profileService.createOrUpdate(user, new ProfileRequest(
                 null, "Out most weekends", LocalDate.of(1996, 5, 5),
-                Gender.PREFER_NOT_TO_SAY, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
         User managed = reload(user);
         managed.setVerificationStatus(VerificationStatus.APPROVED);
         return userRepository.save(managed);

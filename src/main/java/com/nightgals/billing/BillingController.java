@@ -1,6 +1,9 @@
 package com.nightgals.billing;
 
+import com.nightgals.billing.dto.BuyPackageRequest;
 import com.nightgals.billing.dto.CheckoutResponse;
+import com.nightgals.billing.dto.CreatorPackageResponse;
+import com.nightgals.billing.dto.CreatorPackageStatusResponse;
 import com.nightgals.billing.dto.EntitlementResponse;
 import com.nightgals.billing.dto.PlanResponse;
 import com.nightgals.billing.dto.PurchaseResponse;
@@ -29,21 +32,23 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 
 @Tag(name = "9. Billing", description = """
-        Paying for access.
+        Money, in both directions.
 
-        **What is free:** the browse feed, every profile card, and the first
-        `freePreviewPhotos` photos on a member's profile.
+        **Viewers pay creators.** Browsing is free - the feed, every profile card, and
+        whatever each creator has marked FREE. Everything she marked EXCLUSIVE costs
+        one payment, at *her* price, and it opens all of it. There is no photo tier and
+        no video tier: you pick a person, not a menu.
 
-        **What is paid:** the rest of somebody's photos, all of their video, and
-        their live sessions. Two ways to get it - unlock one member, or subscribe
-        and unlock everybody.
+        **Creators pay the platform.** Publishing needs a package -
+        `BRONZE` (photos), `SILVER` (video) or `GOLD` (both) - each with its own
+        allowance. See `GET /billing/creator-packages`.
 
-        **No payment provider is integrated yet.** Purchases are created `PENDING`
-        and the configured provider says how to pay. The default provider returns
-        `action: MANUAL` with instructions, and an administrator settles the
-        purchase once money arrives. When a real API (M-Pesa Daraja, a card
-        gateway) is wired in, only that provider changes - the access rules,
-        entitlements and endpoints below stay exactly as they are.
+        **No payment provider is integrated yet.** Purchases are created `PENDING` and
+        the configured provider says how to pay. The default returns `action: MANUAL`
+        with instructions, and an administrator settles the purchase once money
+        arrives. When a real API (M-Pesa Daraja, a card gateway) is wired in, only that
+        provider changes - the access rules, entitlements and endpoints below stay
+        exactly as they are.
         """)
 @RestController
 @RequestMapping("/api/v1/billing")
@@ -51,6 +56,7 @@ import java.util.UUID;
 public class BillingController {
 
     private final BillingService billingService;
+    private final CreatorPackageService creatorPackageService;
 
     @Operation(summary = "Prices and plans",
             description = "What things cost and how much is free. Open, so a paywall screen can render before sign-in.",
@@ -101,6 +107,66 @@ public class BillingController {
                                       @Valid @RequestBody SubscribeRequest request) {
         return billingService.subscribe(principal.user(), request.planCode());
     }
+
+    // ------------------------------------------------------------ creator side
+
+    @Operation(summary = "The three creator packages",
+            description = """
+                    What a creator pays the platform for the right to publish, cheapest first.
+
+                    * **Bronze** - photos only, small allowance
+                    * **Silver** - video only, small allowance
+                    * **Gold** - photos and video, large allowance
+
+                    `maxPhotos: 0` means that package does not cover photos at all, and the
+                    same for `maxVideos`. Open, so the pricing page renders before sign-in.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "The packages on sale")
+    @GetMapping("/creator-packages")
+    public java.util.List<CreatorPackageResponse> creatorPackages() {
+        return creatorPackageService.catalogue();
+    }
+
+    @Operation(summary = "My package, and how much of it is left",
+            description = """
+                    The one call the studio makes before showing an upload button.
+
+                    `canPostPhotos` and `canPostVideos` already account for the package
+                    covering that media type *and* having room left, so a client does not have
+                    to work out the combination itself. `available` carries the full catalogue
+                    for rendering an upgrade path.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Publishing rights and remaining allowance")
+    @GetMapping("/creator-packages/mine")
+    public CreatorPackageStatusResponse myPackage(@AuthenticationPrincipal AuthUser principal) {
+        return creatorPackageService.status(principal.user());
+    }
+
+    @Operation(summary = "Buy a creator package",
+            description = """
+                    Starts a payment for `BRONZE`, `SILVER` or `GOLD`. Publishing unlocks once
+                    the purchase reaches `COMPLETED`.
+
+                    Buying the same package again while it is still running extends it from the
+                    current expiry, so renewing early costs no days. Buying a *different* one
+                    starts a fresh period at the new allowance.
+
+                    Identity verification is not required to buy - paying while documents are
+                    in review means the package is live the moment approval lands.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
+    @ApiResponse(responseCode = "400", description = "Unknown package code",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Creator packages are switched off here",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/creator-packages")
+    public CheckoutResponse buyCreatorPackage(@AuthenticationPrincipal AuthUser principal,
+                                              @Valid @RequestBody BuyPackageRequest request) {
+        return billingService.buyCreatorPackage(principal.user(), request.packageCode());
+    }
+
+    // ------------------------------------------------------------ reads
 
     @Operation(summary = "What I currently have access to",
             description = "The one call a client makes to decide whether to draw paywalls.")
