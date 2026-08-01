@@ -33,6 +33,13 @@ public record AuthResponse(
                 """)
         boolean emailVerified,
 
+        @Schema(description = """
+                When the 7 days of free access run out. Everything is open until then -
+                a viewer sees premium content, a creator can publish - so a client should
+                surface this rather than let it expire as a surprise.
+                """)
+        java.time.Instant trialEndsAt,
+
         @Schema(description = "False until the user completes their profile. Creators only.")
         boolean profileComplete) {
 }

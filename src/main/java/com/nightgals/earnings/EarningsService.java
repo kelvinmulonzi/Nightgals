@@ -51,15 +51,19 @@ public class EarningsService {
     // ------------------------------------------------------------ attribution
 
     /**
-     * Credits a creator for a settled unlock.
+     * Credits a creator for one settled sale - a video, a broadcast or a call.
+     *
+     * <p>Attribution is exact now that everything is sold per item: the money came
+     * from one purchase of one thing belonging to one creator, so there is nothing
+     * to apportion. The subscription-share machinery below is only still here for
+     * historical rows.
      *
      * <p>Guarded by a unique index on the purchase, so replaying settlement
      * cannot pay twice.
      */
     @Transactional
-    public void recordUnlockEarning(Purchase purchase) {
-        if (purchase.getType() != PurchaseType.PROFILE_UNLOCK
-                || purchase.getStatus() != PurchaseStatus.COMPLETED) {
+    public void recordItemEarning(Purchase purchase, User creator) {
+        if (purchase.getStatus() != PurchaseStatus.COMPLETED) {
             return;
         }
         if (earningRepository.existsForPurchase(purchase.getId(), EarningType.UNLOCK)) {
@@ -69,7 +73,7 @@ public class EarningsService {
         Split split = split(purchase.getAmountMinor());
         Instant availableAt = Instant.now().plus(properties.holdPeriod());
         earningRepository.save(Earning.builder()
-                .creator(purchase.getTargetUser())
+                .creator(creator)
                 .type(EarningType.UNLOCK)
                 .purchase(purchase)
                 .grossMinor(split.gross())
@@ -80,8 +84,8 @@ public class EarningsService {
                 .availableAt(availableAt)
                 .build());
 
-        log.info("Creator {} earned {} minor units from unlock purchase {}",
-                purchase.getTargetUser().getId(), split.net(), purchase.getId());
+        log.info("Creator {} earned {} minor units from purchase {} ({})",
+                creator.getId(), split.net(), purchase.getId(), purchase.getType());
     }
 
     /**

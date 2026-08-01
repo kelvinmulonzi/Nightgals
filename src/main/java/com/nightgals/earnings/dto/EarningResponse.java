@@ -3,6 +3,7 @@ package com.nightgals.earnings.dto;
 import com.nightgals.earnings.Earning;
 import com.nightgals.earnings.EarningStatus;
 import com.nightgals.earnings.EarningType;
+import com.nightgals.common.Money;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
@@ -31,7 +32,7 @@ public record EarningResponse(
                 e.getGrossMinor(),
                 e.getCommissionMinor(),
                 e.getNetMinor(),
-                String.format("%.2f", e.getNetMinor() / 100.0),
+                Money.plain(e.getNetMinor(), e.getCurrency()),
                 e.getCurrency(),
                 e.getStatus(),
                 e.getPeriod(),

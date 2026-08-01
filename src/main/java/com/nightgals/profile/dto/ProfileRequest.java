@@ -3,7 +3,6 @@ package com.nightgals.profile.dto;
 import com.nightgals.profile.Gender;
 import com.nightgals.profile.Vibe;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Size;
@@ -41,19 +40,5 @@ public record ProfileRequest(
         Vibe vibe,
 
         @Schema(description = "Whether other members can find this profile. Defaults to true.")
-        Boolean discoverable,
-
-        @Schema(description = """
-                What a viewer pays, in minor units, to unlock everything you have posted.
-                10000 is KES 100.00.
-
-                Leave it out to keep whatever is set, and send `0`-and-above within the
-                platform's bounds to change it. Creators who never set one are sold at the
-                platform default.
-
-                Changing it only affects new purchases: anybody mid-checkout pays the price
-                they were quoted.
-                """, example = "15000")
-        @Min(value = 0, message = "A price cannot be negative")
-        Long unlockPriceMinor) {
+        Boolean discoverable) {
 }

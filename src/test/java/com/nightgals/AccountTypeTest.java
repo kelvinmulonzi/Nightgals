@@ -55,7 +55,7 @@ class AccountTypeTest {
     @Test
     @DisplayName("Registration defaults to a viewer account")
     void defaultsToViewer() {
-        var response = authService.register(new RegisterRequest(email(), "correct-horse-9", null), null);
+        var response = authService.register(new RegisterRequest(email(), "correct-horse-9", null, null), null);
         assertThat(response.auth().accountType()).isEqualTo(AccountType.VIEWER);
     }
 
@@ -87,7 +87,7 @@ class AccountTypeTest {
         // Nobody fills in a public profile by accident, so this is treated as intent
         // rather than bounced back with an error.
         profileService.createOrUpdate(viewer, new ProfileRequest(
-                null, null, LocalDate.of(1996, 1, 1), Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                null, null, LocalDate.of(1996, 1, 1), Gender.FEMALE, "Nairobi", "Kenya", null, null));
 
         User after = reload(viewer);
         assertThat(after.getAccountType()).isEqualTo(AccountType.CREATOR);
@@ -101,7 +101,7 @@ class AccountTypeTest {
         User viewer = register(AccountType.VIEWER);
 
         mediaService.listPublic(creator.getId(), viewer);
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
+        var checkout = billingService.unlockMedia(viewer, paidItemOf(creator));
         billingService.settle(checkout.purchase().id(), "STILL-A-VIEWER");
         mediaService.listPublic(creator.getId(), reload(viewer));
 
@@ -114,7 +114,7 @@ class AccountTypeTest {
     void startingKycUpgrades() {
         User viewer = register(AccountType.VIEWER);
         profileService.createOrUpdate(viewer, new ProfileRequest(
-                null, null, LocalDate.of(1996, 1, 1), Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                null, null, LocalDate.of(1996, 1, 1), Gender.FEMALE, "Nairobi", "Kenya", null, null));
 
         kycService.startOrUpdate(reload(viewer), new KycSubmissionRequest(
                 DocumentType.PASSPORT, "A Creator", LocalDate.of(1996, 1, 1), "KE", "P1234567"));
@@ -130,16 +130,16 @@ class AccountTypeTest {
         // one is needed for there to be anything behind the paywall.
         mediaService.upload(reload(creator), MediaType.PHOTO,
                 new MockMultipartFile("file", "free.jpg", "image/jpeg", new byte[]{1}), null,
-                ContentTier.FREE);
-        mediaService.upload(reload(creator), MediaType.PHOTO,
+                ContentTier.FREE, null);
+        var paid = mediaService.upload(reload(creator), MediaType.PHOTO,
                 new MockMultipartFile("file", "paid.jpg", "image/jpeg", new byte[]{2}), null,
-                ContentTier.EXCLUSIVE);
+                ContentTier.EXCLUSIVE, null);
 
         User viewer = register(AccountType.VIEWER);
         assertThat(mediaService.listPublic(creator.getId(), viewer))
                 .anySatisfy(m -> assertThat(m.locked()).isTrue());
 
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
+        var checkout = billingService.unlockMedia(viewer, paid.id());
         billingService.settle(checkout.purchase().id(), "VIEWER-PAYS");
 
         assertThat(mediaService.listPublic(creator.getId(), reload(viewer)))
@@ -153,7 +153,7 @@ class AccountTypeTest {
         User viewer = register(AccountType.VIEWER);
         String handle = viewer.getUsername();
 
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
+        var checkout = billingService.unlockMedia(viewer, paidItemOf(creator));
         billingService.settle(checkout.purchase().id(), "KEEP-ME");
 
         MeResponse upgraded = accountUpgradeService.becomeCreator(reload(viewer));
@@ -161,12 +161,12 @@ class AccountTypeTest {
         assertThat(upgraded.nextStep()).isEqualTo("CREATE_PROFILE");
         assertThat(upgraded.username()).isEqualTo(handle);
 
-        // The unlock they paid for survives the change.
-        assertThat(billingService.entitlements(reload(viewer)).unlockedMembers()).hasSize(1);
+        // The item they paid for survives the change.
+        assertThat(billingService.entitlements(reload(viewer)).unlockedItems()).isEqualTo(1);
 
         // And the creator path is now open to them.
         profileService.createOrUpdate(reload(viewer), new ProfileRequest(
-                null, null, LocalDate.of(1994, 3, 3), Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                null, null, LocalDate.of(1994, 3, 3), Gender.FEMALE, "Nairobi", "Kenya", null, null));
     }
 
     @Test
@@ -186,14 +186,14 @@ class AccountTypeTest {
 
     private User register(AccountType type) {
         String e = email();
-        authService.register(new RegisterRequest(e, "correct-horse-9", type), null);
+        authService.register(new RegisterRequest(e, "correct-horse-9", type, null), null);
         return userRepository.findByEmailIgnoreCase(e).orElseThrow();
     }
 
     private User approvedCreator() {
         User user = register(AccountType.CREATOR);
         profileService.createOrUpdate(user, new ProfileRequest(
-                null, null, LocalDate.of(1996, 5, 5), Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                null, null, LocalDate.of(1996, 5, 5), Gender.FEMALE, "Nairobi", "Kenya", null, null));
         User managed = reload(user);
         managed.setVerificationStatus(VerificationStatus.APPROVED);
         return userRepository.save(managed);
@@ -201,5 +201,22 @@ class AccountTypeTest {
 
     private User reload(User user) {
         return userRepository.findById(user.getId()).orElseThrow();
+    }
+
+    /**
+     * A locked item on this creator's profile.
+     *
+     * <p>The first photo is forced FREE - it is the profile picture - so anything
+     * behind the paywall has to be the second one or later.
+     */
+    private java.util.UUID paidItemOf(User creator) {
+        // The first photo is forced FREE - it becomes the profile picture - so the
+        // cover is burned before publishing something that is genuinely paid.
+        mediaService.upload(reload(creator), MediaType.PHOTO,
+                new MockMultipartFile("file", "cover.jpg", "image/jpeg", new byte[]{6}),
+                null, ContentTier.FREE, null);
+        return mediaService.upload(reload(creator), MediaType.PHOTO,
+                new MockMultipartFile("file", "paid.jpg", "image/jpeg", new byte[]{7}),
+                null, ContentTier.EXCLUSIVE, null).id();
     }
 }

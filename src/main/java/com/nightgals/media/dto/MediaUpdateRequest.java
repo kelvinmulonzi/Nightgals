@@ -21,5 +21,17 @@ public record MediaUpdateRequest(
         ContentTier tier,
 
         @Schema(description = "Make this the main profile photo. Photos only, and it becomes FREE.")
-        Boolean primary) {
+        Boolean primary,
+
+        @Schema(description = """
+                What a viewer pays for this one item, in minor units. Yours to set, per
+                item - "users can set their own unlock price for every premium video
+                they upload".
+
+                Leave it out to keep whatever is set. An item you never price sells at
+                the platform default. Changing it only affects new purchases: anybody
+                mid-checkout pays the price they were quoted.
+                """, example = "3000")
+        @Min(value = 0, message = "A price cannot be negative")
+        Long unlockPriceMinor) {
 }

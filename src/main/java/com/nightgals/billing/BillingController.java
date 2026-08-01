@@ -5,9 +5,7 @@ import com.nightgals.billing.dto.CheckoutResponse;
 import com.nightgals.billing.dto.CreatorPackageResponse;
 import com.nightgals.billing.dto.CreatorPackageStatusResponse;
 import com.nightgals.billing.dto.EntitlementResponse;
-import com.nightgals.billing.dto.PlanResponse;
 import com.nightgals.billing.dto.PurchaseResponse;
-import com.nightgals.billing.dto.SubscribeRequest;
 import com.nightgals.common.ErrorResponse;
 import com.nightgals.common.PageResponse;
 import com.nightgals.user.AuthUser;
@@ -29,26 +27,31 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @Tag(name = "9. Billing", description = """
         Money, in both directions.
 
-        **Viewers pay creators.** Browsing is free - the feed, every profile card, and
-        whatever each creator has marked FREE. Everything she marked EXCLUSIVE costs
-        one payment, at *her* price, and it opens all of it. There is no photo tier and
-        no video tier: you pick a person, not a menu.
+        **Viewers pay creators, per item.** One video, one broadcast, or one private
+        call - each at the price its creator set on it. There is no bundle and no
+        all-access pass: a fan pays for the thing they want to watch.
 
-        **Creators pay the platform.** Publishing needs a package -
-        `BRONZE` (photos), `SILVER` (video) or `GOLD` (both) - each with its own
-        allowance. See `GET /billing/creator-packages`.
+        **Creators pay the platform, weekly.** `PRO`, `DIAMOND` or `BLACK_DIAMOND`.
+        Every package covers photos and video; they differ on how many premium videos
+        may be posted, how many minutes of live per day, and where she ranks in search.
+
+        **Everything is free for the first 7 days.** A new account is on trial and
+        every paywall passes for it - viewers watch, creators publish - so nobody hits
+        a payment screen before they have seen what they are buying.
+
+        **Credit is spendable here.** Referral credit is applied before the payment
+        provider is involved, so a purchase covered entirely by credit settles without
+        a payment at all.
 
         **No payment provider is integrated yet.** Purchases are created `PENDING` and
-        the configured provider says how to pay. The default returns `action: MANUAL`
-        with instructions, and an administrator settles the purchase once money
-        arrives. When a real API (M-Pesa Daraja, a card gateway) is wired in, only that
-        provider changes - the access rules, entitlements and endpoints below stay
-        exactly as they are.
+        the configured provider says how to pay. The default settles instantly and
+        collects nothing.
         """)
 @RestController
 @RequestMapping("/api/v1/billing")
@@ -58,73 +61,70 @@ public class BillingController {
     private final BillingService billingService;
     private final CreatorPackageService creatorPackageService;
 
-    @Operation(summary = "Prices and plans",
-            description = "What things cost and how much is free. Open, so a paywall screen can render before sign-in.",
-            security = @SecurityRequirement(name = ""))
-    @ApiResponse(responseCode = "200", description = "The catalogue")
-    @GetMapping("/plans")
-    public PlanResponse plans() {
-        return billingService.plans();
+    // ------------------------------------------------------------ viewers pay
+
+    @Operation(
+            summary = "Buy one photo or video",
+            description = """
+                    Charges the price the creator set on that item, and opens that item
+                    only. Nothing else of hers comes with it.
+
+                    Returns the purchase plus how to pay. Access is granted when the
+                    purchase reaches `COMPLETED`, which with the default provider is
+                    before this response is written - check `purchase.status` rather than
+                    assuming it is pending.
+
+                    Calling it twice returns the existing pending purchase rather than
+                    opening a second one, and the price is fixed when that purchase is
+                    created: a creator changing hers mid-checkout does not change what
+                    you are charged.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
+    @ApiResponse(responseCode = "400", description = "It is free, or it is your own",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "No such item",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Already owned, or monetisation is off",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/media/{mediaId}")
+    public CheckoutResponse unlockMedia(@AuthenticationPrincipal AuthUser principal,
+                                        @PathVariable UUID mediaId) {
+        return billingService.unlockMedia(principal.user(), mediaId);
     }
 
     @Operation(
-            summary = "Unlock one member",
+            summary = "Buy entry to one live broadcast",
             description = """
-                    Starts a payment that grants access to this member's photos, video and
-                    live sessions for the configured period.
-
-                    Returns the purchase in `PENDING` plus how to pay. Access is granted only
-                    once the purchase reaches `COMPLETED` - poll
-                    `GET /api/v1/billing/purchases` or `GET /api/v1/billing/entitlements`.
-
-                    Calling it twice for the same member returns the existing pending purchase
-                    rather than creating a second one.
+                    Each stream carries its own access price, set by its host. Buying one
+                    grants the playback URL for that stream and nothing else.
                     """)
     @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
-    @ApiResponse(responseCode = "404", description = "No such member, or they are not verified",
+    @ApiResponse(responseCode = "400", description = "It is open to everyone, or it is your own",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    @ApiResponse(responseCode = "409", description = "Already unlocked, or monetisation is switched off",
-            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    @PostMapping("/unlocks/{userId}")
-    public CheckoutResponse unlockProfile(@AuthenticationPrincipal AuthUser principal,
-                                          @PathVariable UUID userId) {
-        return billingService.unlockProfile(principal.user(), userId);
+    @PostMapping("/live/{sessionId}")
+    public CheckoutResponse buyLiveAccess(@AuthenticationPrincipal AuthUser principal,
+                                          @PathVariable UUID sessionId) {
+        return billingService.buyLiveAccess(principal.user(), sessionId);
     }
 
-    @Operation(summary = "Subscribe",
-            description = """
-                    Starts a payment for a plan from `GET /api/v1/billing/plans`. An active
-                    subscription unlocks every member, so no individual unlocks are needed.
-
-                    Renewing while still active extends from the current expiry - nobody loses
-                    days by paying early.
-                    """)
-    @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
-    @ApiResponse(responseCode = "400", description = "Unknown plan code",
-            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    @PostMapping("/subscriptions")
-    public CheckoutResponse subscribe(@AuthenticationPrincipal AuthUser principal,
-                                      @Valid @RequestBody SubscribeRequest request) {
-        return billingService.subscribe(principal.user(), request.planCode());
-    }
-
-    // ------------------------------------------------------------ creator side
+    // ------------------------------------------------------------ creators pay
 
     @Operation(summary = "The three creator packages",
             description = """
-                    What a creator pays the platform for the right to publish, cheapest first.
+                    What a creator pays the platform, weekly, cheapest first.
 
-                    * **Bronze** - photos only, small allowance
-                    * **Silver** - video only, small allowance
-                    * **Gold** - photos and video, large allowance
+                    | | Live per day | Premium videos | Placement |
+                    |---|---|---|---|
+                    | **Pro** | 15 minutes | 2 | standard |
+                    | **Diamond** | 45 minutes | 5 | second |
+                    | **Black Diamond** | 2 hours | 10 | highest |
 
-                    `maxPhotos: 0` means that package does not cover photos at all, and the
-                    same for `maxVideos`. Open, so the pricing page renders before sign-in.
+                    Open, so the pricing page renders before sign-in.
                     """,
             security = @SecurityRequirement(name = ""))
     @ApiResponse(responseCode = "200", description = "The packages on sale")
     @GetMapping("/creator-packages")
-    public java.util.List<CreatorPackageResponse> creatorPackages() {
+    public List<CreatorPackageResponse> creatorPackages() {
         return creatorPackageService.catalogue();
     }
 
@@ -132,10 +132,12 @@ public class BillingController {
             description = """
                     The one call the studio makes before showing an upload button.
 
-                    `canPostPhotos` and `canPostVideos` already account for the package
-                    covering that media type *and* having room left, so a client does not have
-                    to work out the combination itself. `available` carries the full catalogue
-                    for rendering an upgrade path.
+                    `canPostPhotos`, `canPostVideos` and `canGoLive` already fold together
+                    "does the package cover this" and "is there room left", so a client
+                    does not have to work out the combination itself.
+
+                    `onTrial` is true for the first 7 days, when everything is unmetered
+                    and `available` is what she will need to buy when it ends.
                     """)
     @ApiResponse(responseCode = "200", description = "Publishing rights and remaining allowance")
     @GetMapping("/creator-packages/mine")
@@ -145,15 +147,16 @@ public class BillingController {
 
     @Operation(summary = "Buy a creator package",
             description = """
-                    Starts a payment for `BRONZE`, `SILVER` or `GOLD`. Publishing unlocks once
-                    the purchase reaches `COMPLETED`.
+                    Starts a payment for `PRO`, `DIAMOND` or `BLACK_DIAMOND`.
 
-                    Buying the same package again while it is still running extends it from the
-                    current expiry, so renewing early costs no days. Buying a *different* one
-                    starts a fresh period at the new allowance.
+                    Buying the same package again while it is still running extends it from
+                    the current expiry, so renewing early costs no days. Buying a *different*
+                    one starts a fresh period at the new allowance, and the longer-running
+                    cover wins - an upgrade applies at once, a downgrade never claws back
+                    time already paid for.
 
-                    Identity verification is not required to buy - paying while documents are
-                    in review means the package is live the moment approval lands.
+                    If somebody referred this account, their bonus is credited when this -
+                    their **first** package - settles.
                     """)
     @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
     @ApiResponse(responseCode = "400", description = "Unknown package code",
@@ -168,9 +171,13 @@ public class BillingController {
 
     // ------------------------------------------------------------ reads
 
-    @Operation(summary = "What I currently have access to",
-            description = "The one call a client makes to decide whether to draw paywalls.")
-    @ApiResponse(responseCode = "200", description = "Active subscription and unlocked members")
+    @Operation(summary = "My standing: trial, credit, and what I own",
+            description = """
+                    Deliberately not a list of everything owned. Access is per item, and a
+                    viewer with two hundred unlocked videos does not want them enumerated on
+                    every page load - each gallery reports its own `locked` flags instead.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Trial, credit balance and owned count")
     @GetMapping("/entitlements")
     public EntitlementResponse entitlements(@AuthenticationPrincipal AuthUser principal) {
         return billingService.entitlements(principal.user());

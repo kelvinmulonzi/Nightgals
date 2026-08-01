@@ -20,7 +20,7 @@ public record MediaResponse(
 
         @Schema(description = """
                 Fetch the bytes from here. Null when the item is behind the paywall -
-                unlock the member to get a URL.
+                buy it to get a URL.
                 """)
         String url,
         String caption,
@@ -31,8 +31,17 @@ public record MediaResponse(
         long sizeBytes,
         String contentType,
 
-        @Schema(description = "True when the caller has not paid to see this item")
+        @Schema(description = "True when the caller has not paid for this item")
         boolean locked,
+
+        @Schema(description = """
+                What this one item costs, in minor units. Present on a locked item -
+                a blurred placeholder with no price is not something anybody buys.
+                Also returned to the owner, so she can see what she is charging.
+                """, example = "3000")
+        Long priceMinor,
+        @Schema(example = "3000") String priceDisplay,
+        @Schema(example = "XAF") String currency,
 
         Instant createdAt) {
 
@@ -52,14 +61,18 @@ public record MediaResponse(
                 asset.getSizeBytes(),
                 asset.getContentType(),
                 false,
+                asset.getUnlockPriceMinor(),
+                null,
+                null,
                 asset.getCreatedAt());
     }
 
     /**
-     * Paywalled view: enough to render a blurred placeholder of the right shape
-     * and count, with no way to reach the file.
+     * Paywalled view: enough to render a blurred placeholder of the right shape,
+     * and the price, with no way to reach the file.
      */
-    public static MediaResponse locked(MediaAsset asset) {
+    public static MediaResponse locked(MediaAsset asset, long priceMinor,
+                                       String priceDisplay, String currency) {
         return new MediaResponse(
                 asset.getId(),
                 asset.getUser().getId(),
@@ -74,6 +87,9 @@ public record MediaResponse(
                 asset.getSizeBytes(),
                 asset.getContentType(),
                 true,
+                priceMinor,
+                priceDisplay,
+                currency,
                 asset.getCreatedAt());
     }
 }

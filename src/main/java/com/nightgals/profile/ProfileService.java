@@ -2,7 +2,6 @@ package com.nightgals.profile;
 
 import com.nightgals.common.ApiException;
 import com.nightgals.config.AppProperties;
-import com.nightgals.config.MonetizationProperties;
 import com.nightgals.profile.dto.ProfileRequest;
 import com.nightgals.profile.dto.ProfileResponse;
 import com.nightgals.user.AccountType;
@@ -26,12 +25,10 @@ public class ProfileService {
     private final ProfileRepository profileRepository;
     private final UserRepository userRepository;
     private final AppProperties appProperties;
-    private final MonetizationProperties monetization;
 
     @Transactional(readOnly = true)
     public ProfileResponse getOwn(UUID userId) {
-        Profile profile = requireProfile(userId);
-        return ProfileResponse.of(profile, pricingOf(profile));
+        return ProfileResponse.of(requireProfile(userId));
     }
 
     /**
@@ -72,12 +69,7 @@ public class ProfileService {
         if (request.discoverable() != null) {
             profile.setDiscoverable(request.discoverable());
         }
-        if (request.unlockPriceMinor() != null) {
-            profile.setUnlockPriceMinor(requireSanedPrice(request.unlockPriceMinor()));
-        }
-
-        Profile saved = profileRepository.save(profile);
-        return ProfileResponse.of(saved, pricingOf(saved));
+        return ProfileResponse.of(profileRepository.save(profile));
     }
 
     /**
@@ -95,53 +87,12 @@ public class ProfileService {
         boolean self = viewer != null && profile.getUser().getId().equals(viewer.getId());
 
         if (self || (viewer != null && viewer.isStaff())) {
-            return ProfileResponse.of(profile, pricingOf(profile));
+            return ProfileResponse.of(profile);
         }
         if (!profile.getUser().isApproved() || !profile.isDiscoverable()) {
             throw ApiException.notFound("Profile");
         }
-        return ProfileResponse.publicView(profile, pricingOf(profile));
-    }
-
-    /**
-     * Resolves what this creator actually costs.
-     *
-     * <p>Her own price when she has set one, the platform default otherwise. The
-     * flag lets a client distinguish "priced at 100 because she chose that" from
-     * "priced at 100 because nobody has chosen anything".
-     */
-    private ProfileResponse.Pricing pricingOf(Profile profile) {
-        Long own = profile.getUnlockPriceMinor();
-        return new ProfileResponse.Pricing(
-                own != null ? own : monetization.profileUnlock().priceMinor(),
-                own != null,
-                monetization.currency());
-    }
-
-    /**
-     * Keeps a creator's price inside the platform's bounds.
-     *
-     * <p>The floor protects the commission from being priced into irrelevance;
-     * the ceiling catches the extra zero somebody typed by accident, which is
-     * otherwise only discovered when nobody buys anything for a month.
-     */
-    private long requireSanedPrice(long priceMinor) {
-        MonetizationProperties.ProfileUnlock unlock = monetization.profileUnlock();
-        if (priceMinor < unlock.floor()) {
-            throw ApiException.badRequest("price_too_low",
-                    "The lowest you can charge is " + money(unlock.floor()) + " "
-                    + monetization.currency() + ".");
-        }
-        if (priceMinor > unlock.ceiling()) {
-            throw ApiException.badRequest("price_too_high",
-                    "The most you can charge is " + money(unlock.ceiling()) + " "
-                    + monetization.currency() + ".");
-        }
-        return priceMinor;
-    }
-
-    private static String money(long minor) {
-        return String.format("%.2f", minor / 100.0);
+        return ProfileResponse.publicView(profile);
     }
 
     @Transactional(readOnly = true)

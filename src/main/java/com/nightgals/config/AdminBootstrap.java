@@ -1,5 +1,6 @@
 package com.nightgals.config;
 
+import com.nightgals.referral.ReferralService;
 import com.nightgals.user.Role;
 import com.nightgals.user.User;
 import com.nightgals.user.UserRepository;
@@ -29,6 +30,7 @@ public class AdminBootstrap implements ApplicationRunner {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ReferralService referralService;
 
     @Value("${nightgals.bootstrap.admin-email:admin@nightgals.local}")
     private String adminEmail;
@@ -53,6 +55,9 @@ public class AdminBootstrap implements ApplicationRunner {
         userRepository.save(User.builder()
                 .email(adminEmail.toLowerCase())
                 .username("NightgalsTeam")
+                // Every account carries one, including this one - the column is
+                // NOT NULL and staff can invite people too.
+                .referralCode(referralService.generateUniqueCode())
                 .passwordHash(passwordEncoder.encode(adminPassword))
                 .role(Role.ADMIN)
                 .status(UserStatus.ACTIVE)

@@ -13,8 +13,10 @@ import com.nightgals.auth.otp.OtpService;
 import com.nightgals.common.ApiException;
 import com.nightgals.common.Hashing;
 import com.nightgals.config.JwtProperties;
+import com.nightgals.config.MonetizationProperties;
 import com.nightgals.mail.EmailService;
 import com.nightgals.profile.ProfileRepository;
+import com.nightgals.referral.ReferralService;
 import com.nightgals.user.AccountType;
 import com.nightgals.user.Role;
 import com.nightgals.user.User;
@@ -50,6 +52,8 @@ public class AuthService {
     private final UsernameService usernameService;
     private final OtpService otpService;
     private final EmailService emailService;
+    private final ReferralService referralService;
+    private final MonetizationProperties monetization;
 
     /**
      * Creates the account and signs it in immediately.
@@ -66,9 +70,19 @@ public class AuthService {
             throw ApiException.conflict("email_taken", "An account with this email already exists");
         }
 
+        // Both are resolved before the row is written: the trial because it is
+        // measured from the account existing, the referrer because it can never be
+        // set again afterwards.
+        Instant trialEnds = monetization.trialEnabled()
+                ? Instant.now().plus(monetization.freeTrial()) : null;
+        User referrer = referralService.resolve(request.referralCode()).orElse(null);
+
         User user = userRepository.save(User.builder()
                 .email(email)
                 .accountType(request.accountType() == null ? AccountType.VIEWER : request.accountType())
+                .referralCode(referralService.generateUniqueCode())
+                .referredBy(referrer)
+                .trialEndsAt(trialEnds)
                 // Every account gets a pseudonym up front, so nobody is ever
                 // identified to other members by their real name.
                 .username(usernameService.generateUnique())
@@ -78,7 +92,8 @@ public class AuthService {
                 .verificationStatus(VerificationStatus.UNVERIFIED)
                 .build());
 
-        log.info("Registered {} account {}", user.getAccountType(), user.getId());
+        log.info("Registered {} account {}{}", user.getAccountType(), user.getId(),
+                referrer == null ? "" : " (referred by " + referrer.getId() + ")");
 
         // Quietly: a mail outage must not cost us a signup. Null comes back when
         // the code could not be sent, and the address simply stays unconfirmed
@@ -228,6 +243,7 @@ public class AuthService {
                 user.getRole(),
                 user.getVerificationStatus(),
                 user.isEmailVerified(),
+                user.getTrialEndsAt(),
                 profileRepository.existsByUserId(user.getId()));
     }
 

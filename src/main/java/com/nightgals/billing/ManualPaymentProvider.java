@@ -1,5 +1,6 @@
 package com.nightgals.billing;
 
+import com.nightgals.common.Money;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -46,6 +47,6 @@ public class ManualPaymentProvider implements PaymentProvider {
     }
 
     private String formatAmount(Purchase purchase) {
-        return String.format("%s %.2f", purchase.getCurrency(), purchase.getAmountMinor() / 100.0);
+        return Money.withCurrency(purchase.getAmountMinor(), purchase.getCurrency());
     }
 }

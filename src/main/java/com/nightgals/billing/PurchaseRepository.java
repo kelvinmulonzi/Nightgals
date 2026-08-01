@@ -25,13 +25,40 @@ public interface PurchaseRepository extends JpaRepository<Purchase, UUID> {
 
     long countByStatus(PurchaseStatus status);
 
-    /** Stops a member opening a second payment for something they are already buying. */
+    /* Stop a member opening a second payment for something they are already buying. */
+
     @Query("""
             SELECT p FROM Purchase p
-            WHERE p.user.id = :userId
-              AND p.type = com.nightgals.billing.PurchaseType.PROFILE_UNLOCK
-              AND p.targetUser.id = :targetId
+            WHERE p.user.id = :userId AND p.media.id = :mediaId
               AND p.status = com.nightgals.billing.PurchaseStatus.PENDING
             """)
-    Optional<Purchase> findPendingUnlock(@Param("userId") UUID userId, @Param("targetId") UUID targetId);
+    Optional<Purchase> findPendingForMedia(@Param("userId") UUID userId, @Param("mediaId") UUID mediaId);
+
+    @Query("""
+            SELECT p FROM Purchase p
+            WHERE p.user.id = :userId AND p.liveSession.id = :sessionId
+              AND p.status = com.nightgals.billing.PurchaseStatus.PENDING
+            """)
+    Optional<Purchase> findPendingForLive(@Param("userId") UUID userId, @Param("sessionId") UUID sessionId);
+
+    @Query("""
+            SELECT p FROM Purchase p
+            WHERE p.user.id = :userId AND p.call.id = :callId
+              AND p.status = com.nightgals.billing.PurchaseStatus.PENDING
+            """)
+    Optional<Purchase> findPendingForCall(@Param("userId") UUID userId, @Param("callId") UUID callId);
+
+    /**
+     * Settled packages this account has bought.
+     *
+     * <p>Drives the once-only referral bonus: "their first subscription" means
+     * exactly that, so a second package earns the referrer nothing.
+     */
+    @Query("""
+            SELECT COUNT(p) FROM Purchase p
+            WHERE p.user.id = :userId
+              AND p.type = com.nightgals.billing.PurchaseType.CREATOR_PACKAGE
+              AND p.status = com.nightgals.billing.PurchaseStatus.COMPLETED
+            """)
+    long countSettledPackages(@Param("userId") UUID userId);
 }

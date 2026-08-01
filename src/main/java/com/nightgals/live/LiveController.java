@@ -16,11 +16,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -85,6 +89,81 @@ public class LiveController {
     public LiveSessionResponse end(@AuthenticationPrincipal AuthUser principal,
                                    @PathVariable UUID sessionId) {
         return liveSessionService.end(principal.user(), sessionId);
+    }
+
+    @Operation(summary = "Edit a scheduled broadcast",
+            description = """
+                    Moving the start time clears the reminder flag, so followers are told
+                    again about the new time rather than the old one.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Updated")
+    @PutMapping("/me/live/{sessionId}")
+    public LiveSessionResponse update(@AuthenticationPrincipal AuthUser principal,
+                                      @PathVariable UUID sessionId,
+                                      @Valid @RequestBody LiveSessionRequest request) {
+        return liveSessionService.update(principal.user(), sessionId, request);
+    }
+
+    // ------------------------------------------------------------ co-hosting
+
+    @Operation(summary = "Invite somebody to co-host",
+            description = """
+                    A session keeps one owner - the minutes come off her daily allowance and
+                    the money is hers. A co-host appears in it and spends none of their own.
+
+                    Re-inviting somebody who declined reopens the invitation rather than failing.
+                    """)
+    @ApiResponse(responseCode = "204", description = "Invited")
+    @PostMapping("/me/live/{sessionId}/hosts/{userId}")
+    public ResponseEntity<Void> invite(@AuthenticationPrincipal AuthUser principal,
+                                       @PathVariable UUID sessionId,
+                                       @PathVariable UUID userId) {
+        liveSessionService.invite(principal.user(), sessionId, userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Take somebody off a session I own")
+    @ApiResponse(responseCode = "204", description = "Removed")
+    @DeleteMapping("/me/live/{sessionId}/hosts/{userId}")
+    public ResponseEntity<Void> removeHost(@AuthenticationPrincipal AuthUser principal,
+                                           @PathVariable UUID sessionId,
+                                           @PathVariable UUID userId) {
+        liveSessionService.removeHost(principal.user(), sessionId, userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Sessions I have been invited to co-host")
+    @ApiResponse(responseCode = "200", description = "Outstanding invitations")
+    @GetMapping("/me/live/invitations")
+    public List<LiveSessionResponse> invitations(@AuthenticationPrincipal AuthUser principal) {
+        return liveSessionService.pendingInvites(principal.user());
+    }
+
+    @Operation(summary = "Accept or decline a co-host invitation")
+    @ApiResponse(responseCode = "204", description = "Answered")
+    @PostMapping("/me/live/invitations/{sessionId}")
+    public ResponseEntity<Void> respond(@AuthenticationPrincipal AuthUser principal,
+                                        @PathVariable UUID sessionId,
+                                        @RequestParam boolean accept) {
+        liveSessionService.respondToInvite(principal.user(), sessionId, accept);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ------------------------------------------------------------ the calendar
+
+    @Operation(summary = "What is coming up",
+            description = """
+                    The calendar: scheduled broadcasts still to come, soonest first. Public,
+                    so somebody can see what is on before deciding to follow anybody.
+
+                    Followers of a creator are emailed shortly before each of her sessions.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "Upcoming broadcasts")
+    @GetMapping("/live/upcoming")
+    public PageResponse<LiveSessionResponse> upcoming(@AuthenticationPrincipal AuthUser principal,
+                                                      @PageableDefault(size = 30) Pageable pageable) {
+        return liveSessionService.upcoming(AuthUser.userOrNull(principal), pageable);
     }
 
     @Operation(summary = "Who is broadcasting right now",

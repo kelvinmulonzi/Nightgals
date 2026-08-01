@@ -21,8 +21,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
@@ -82,17 +80,21 @@ public class BillingAdminController {
         return billingService.fail(purchaseId, reason);
     }
 
-    @Operation(summary = "Grant access without payment",
-            description = "Comps, support gestures and testing. Recorded with source `GRANT`, not `PURCHASE`.")
+    @Operation(summary = "Grant one item without payment",
+            description = """
+                    Comps, support gestures and testing. Recorded with source `GRANT`
+                    rather than `PURCHASE`, so it is distinguishable later and produces no
+                    earnings for the creator.
+
+                    Per item, like everything else - granting a whole profile is no longer
+                    a thing that can be expressed.
+                    """)
     @ApiResponse(responseCode = "204", description = "Access granted")
     @PostMapping("/grants")
     public ResponseEntity<Void> grant(
             @Parameter(description = "Who receives the access", required = true) @RequestParam UUID viewerId,
-            @Parameter(description = "Whose content they may see", required = true) @RequestParam UUID targetId,
-            @Parameter(description = "How long it lasts, ISO-8601, e.g. P30D. Omit for permanent.")
-            @RequestParam(required = false) Duration duration) {
-        billingService.grantUnlock(viewerId, targetId,
-                duration == null ? null : Instant.now().plus(duration));
+            @Parameter(description = "Which item they may see", required = true) @RequestParam UUID mediaId) {
+        billingService.grantMedia(viewerId, mediaId);
         return ResponseEntity.noContent().build();
     }
 }

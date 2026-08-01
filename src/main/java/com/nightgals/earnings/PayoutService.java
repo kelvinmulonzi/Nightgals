@@ -244,6 +244,6 @@ public class PayoutService {
     }
 
     private String money(long minor) {
-        return String.format("%.2f", minor / 100.0);
+        return com.nightgals.common.Money.plain(minor, monetizationProperties.currency());
     }
 }

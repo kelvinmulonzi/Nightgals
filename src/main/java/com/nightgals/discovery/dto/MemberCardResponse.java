@@ -5,11 +5,12 @@ import com.nightgals.profile.Profile;
 import com.nightgals.profile.Vibe;
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import java.util.List;
 import java.util.UUID;
 
 @Schema(description = """
-        The lean profile shown while scrolling the feed. Free to everyone who is
-        verified. Enough to decide whether somebody is worth unlocking, and no more.
+        The lean profile shown while scrolling. Free to everyone, signed in or not.
+        Enough to decide whether somebody is worth paying for, and no more.
         """)
 public record MemberCardResponse(
         UUID userId,
@@ -21,37 +22,44 @@ public record MemberCardResponse(
         Vibe vibe,
         String bio,
 
-        @Schema(description = "Photos the creator marked FREE. Playable by anyone.")
-        java.util.List<String> freePhotoUrls,
+        @Schema(description = "Photos the caller can already see. Playable now.")
+        List<String> freePhotoUrls,
 
-        @Schema(description = "Videos the creator marked FREE. Playable by anyone.")
-        java.util.List<String> freeVideoUrls,
+        @Schema(description = "Videos the caller can already see. Playable now.")
+        List<String> freeVideoUrls,
 
         @Schema(description = "Photos behind the paywall", example = "6") int lockedPhotoCount,
         @Schema(description = "Videos behind the paywall", example = "2") int lockedVideoCount,
         @Schema(description = "True if this member is broadcasting right now") boolean liveNow,
-
-        @Schema(description = "True when the caller can already see everything - no payment needed")
-        boolean unlocked,
+        @Schema(description = "True if the caller follows her") boolean following,
 
         @Schema(description = """
-                What unlocking this creator costs, in minor units. Her price if she set
-                one, the platform default otherwise - so the card can show a real number
-                without a second call.
-                """, example = "15000")
-        long unlockPriceMinor,
+                The cheapest locked item on this profile, in minor units - everything is
+                priced per item now, so there is no single price for a person. Null when
+                nothing of hers is locked to this caller.
+                """, example = "2000")
+        Long fromPriceMinor,
+        @Schema(example = "2000") String fromPriceDisplay,
 
-        @Schema(example = "150.00") String unlockPriceDisplay,
-        @Schema(example = "KES") String currency) {
+        @Schema(description = """
+                Placement weight from her package: 3 Black Diamond, 2 Diamond, 1 Pro,
+                0 unranked. The feed is already sorted by it; this is here so a client
+                can badge the top tier rather than re-sort.
+                """, example = "3")
+        int searchPriority,
+
+        @Schema(example = "XAF") String currency) {
 
     public static MemberCardResponse of(Profile profile,
-                                        java.util.List<String> freePhotoUrls,
-                                        java.util.List<String> freeVideoUrls,
+                                        List<String> freePhotoUrls,
+                                        List<String> freeVideoUrls,
                                         int lockedPhotoCount,
                                         int lockedVideoCount,
                                         boolean liveNow,
-                                        boolean unlocked,
-                                        long unlockPriceMinor,
+                                        boolean following,
+                                        Long fromPriceMinor,
+                                        String fromPriceDisplay,
+                                        int searchPriority,
                                         String currency) {
         return new MemberCardResponse(
                 profile.getUser().getId(),
@@ -67,9 +75,10 @@ public record MemberCardResponse(
                 lockedPhotoCount,
                 lockedVideoCount,
                 liveNow,
-                unlocked,
-                unlockPriceMinor,
-                String.format("%.2f", unlockPriceMinor / 100.0),
+                following,
+                fromPriceMinor,
+                fromPriceDisplay,
+                searchPriority,
                 currency);
     }
 }

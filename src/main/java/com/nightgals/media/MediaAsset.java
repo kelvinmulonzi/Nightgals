@@ -70,6 +70,16 @@ public class MediaAsset extends BaseEntity {
     @Column(name = "rejection_reason", length = 200)
     private String rejectionReason;
 
+    /**
+     * What a viewer pays for this one item, in minor units.
+     *
+     * <p>Set by the creator, per item. Null falls back to the platform default,
+     * so something she never priced is still sellable. Meaningless on a FREE
+     * item, which is the shop window and is never charged for.
+     */
+    @Column(name = "unlock_price_minor")
+    private Long unlockPriceMinor;
+
     public boolean isVisibleToOthers() {
         return status == MediaStatus.APPROVED;
     }

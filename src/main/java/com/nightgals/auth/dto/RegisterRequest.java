@@ -33,5 +33,16 @@ public record RegisterRequest(
 
                 A viewer can switch later with `POST /api/v1/me/become-creator`.
                 """)
-        AccountType accountType) {
+        AccountType accountType,
+
+        @Schema(description = """
+                An invite code, if they arrived through somebody's referral link.
+
+                Optional, and a code that matches nothing is ignored rather than
+                rejected - somebody mistyping an invite should still end up with an
+                account. The referrer is credited when this account buys its first
+                package, not now.
+                """, example = "K7RBQ2XM")
+        @Size(max = 12)
+        String referralCode) {
 }

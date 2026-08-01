@@ -55,11 +55,11 @@ class MediaUploadWebTest {
     @BeforeEach
     void createApprovedCreator() {
         String email = "creator-" + UUID.randomUUID() + "@example.com";
-        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR), null);
+        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR, null), null);
         User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
         profileService.createOrUpdate(user, new ProfileRequest(
                 null, null, LocalDate.of(1995, 2, 2),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                Gender.FEMALE, "Nairobi", "Kenya", null, null));
         user.setVerificationStatus(VerificationStatus.APPROVED);
         bearer = "Bearer " + jwtService.issueAccessToken(userRepository.save(user));
     }

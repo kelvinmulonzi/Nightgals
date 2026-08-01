@@ -4,6 +4,7 @@ import com.nightgals.billing.CreatorPackageCode;
 import com.nightgals.billing.Purchase;
 import com.nightgals.billing.PurchaseStatus;
 import com.nightgals.billing.PurchaseType;
+import com.nightgals.common.Money;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
@@ -33,7 +34,7 @@ public record PurchaseResponse(
                 p.getPlanCode(),
                 p.getPackageCode(),
                 p.getAmountMinor(),
-                String.format("%.2f", p.getAmountMinor() / 100.0),
+                Money.plain(p.getAmountMinor(), p.getCurrency()),
                 p.getCurrency(),
                 p.getStatus(),
                 p.getProvider(),

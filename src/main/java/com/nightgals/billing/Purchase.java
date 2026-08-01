@@ -45,10 +45,35 @@ public class Purchase extends BaseEntity {
     @Column(name = "plan_code", length = 30)
     private String planCode;
 
-    /** Set for CREATOR_PACKAGE only: BRONZE, SILVER or GOLD. */
+    /** Set for CREATOR_PACKAGE only: PRO, DIAMOND or BLACK_DIAMOND. */
     @Enumerated(EnumType.STRING)
     @Column(name = "package_code", length = 30)
     private CreatorPackageCode packageCode;
+
+    /** Set for MEDIA_UNLOCK only: the one photo or video being bought. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "media_id")
+    private com.nightgals.media.MediaAsset media;
+
+    /** Set for LIVE_ACCESS only: the one broadcast being bought. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "live_session_id")
+    private com.nightgals.live.LiveSession liveSession;
+
+    /** Set for CALL_BOOKING only. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "call_id")
+    private com.nightgals.calls.VideoCall call;
+
+    /**
+     * Credit put towards this purchase.
+     *
+     * <p>Recorded here as well as in the ledger so a receipt can say "5 000 paid
+     * with credit, 10 000 charged" without joining anything.
+     */
+    @Column(name = "credit_applied_minor", nullable = false)
+    @Builder.Default
+    private long creditAppliedMinor = 0L;
 
     @Column(name = "amount_minor", nullable = false)
     private long amountMinor;

@@ -1,8 +1,9 @@
 package com.nightgals.discovery;
 
+import com.nightgals.billing.CreatorPackageService;
 import com.nightgals.billing.EntitlementService;
+import com.nightgals.billing.ItemPricingService;
 import com.nightgals.common.PageResponse;
-import com.nightgals.config.MonetizationProperties;
 import com.nightgals.discovery.dto.MemberCardResponse;
 import com.nightgals.live.LiveSessionRepository;
 import com.nightgals.media.MediaAsset;
@@ -11,6 +12,7 @@ import com.nightgals.media.MediaStatus;
 import com.nightgals.media.MediaType;
 import com.nightgals.profile.Profile;
 import com.nightgals.profile.ProfileRepository;
+import com.nightgals.social.FollowService;
 import com.nightgals.user.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -28,9 +30,14 @@ import java.util.UUID;
 /**
  * The scroll feed.
  *
- * <p>Free to any verified member: a card carries enough to judge interest, and
- * the counts of what is behind the paywall. Paying is what turns those counts
- * into content.
+ * <p>Free to look at, and ordered by package: Black Diamond first, then Diamond,
+ * then Pro, then everybody else - which is the visibility those packages are
+ * sold on. The ordering is done in the query rather than here, because sorting a
+ * page after fetching it only sorts that page.
+ *
+ * <p>A card carries the cheapest thing on the profile rather than one price for
+ * the person: with per-item pricing there is no single number, and "from 2,000"
+ * is the honest way to say so.
  */
 @Service
 @RequiredArgsConstructor
@@ -43,7 +50,9 @@ public class FeedService {
     private final MediaRepository mediaRepository;
     private final LiveSessionRepository liveSessionRepository;
     private final EntitlementService entitlementService;
-    private final MonetizationProperties monetization;
+    private final CreatorPackageService packageService;
+    private final FollowService followService;
+    private final ItemPricingService pricing;
 
     /**
      * @param viewer the caller, or null when anonymous - the feed is public so
@@ -64,47 +73,64 @@ public class FeedService {
             return PageResponse.from(page, p -> null);
         }
 
-        // Three batch queries for the whole page rather than three per card.
-        Set<UUID> unlocked = entitlementService.unlockedAmong(viewer, userIds);
+        // Batch queries for the whole page rather than several per card.
+        List<MediaAsset> allMedia = mediaRepository.findApprovedForUsers(userIds, MediaStatus.APPROVED);
+        Set<UUID> viewable = entitlementService.viewableAmong(viewer, allMedia);
         Set<UUID> liveHosts = Set.copyOf(liveSessionRepository.findLiveHostIds(userIds));
-        Map<UUID, List<MediaAsset>> mediaByUser = approvedMediaFor(userIds);
+        Set<UUID> followed = followService.followedAmong(viewer, userIds);
+        Map<UUID, List<MediaAsset>> mediaByUser = groupByUser(allMedia);
 
         return PageResponse.from(page, profile -> {
             UUID userId = profile.getUser().getId();
             List<MediaAsset> media = mediaByUser.getOrDefault(userId, List.of());
-            boolean isUnlocked = unlocked.contains(userId);
 
             List<String> freePhotoUrls = new ArrayList<>();
             List<String> freeVideoUrls = new ArrayList<>();
             int lockedPhotos = 0;
             int lockedVideos = 0;
+            Long cheapest = null;
 
             for (MediaAsset asset : media) {
-                // An unlocked viewer has nothing left behind the paywall, so every
-                // item is playable for them.
-                boolean visible = asset.isFree() || isUnlocked;
-                String url = "/api/v1/media/" + asset.getId() + "/file";
+                if (viewable.contains(asset.getId())) {
+                    String url = "/api/v1/media/" + asset.getId() + "/file";
+                    if (asset.getType() == MediaType.PHOTO) {
+                        freePhotoUrls.add(url);
+                    } else {
+                        freeVideoUrls.add(url);
+                    }
+                    continue;
+                }
 
                 if (asset.getType() == MediaType.PHOTO) {
-                    if (visible) freePhotoUrls.add(url); else lockedPhotos++;
+                    lockedPhotos++;
                 } else {
-                    if (visible) freeVideoUrls.add(url); else lockedVideos++;
+                    lockedVideos++;
+                }
+                // "From X" needs the cheapest locked thing, not the first one.
+                long price = pricing.priceOf(asset);
+                if (cheapest == null || price < cheapest) {
+                    cheapest = price;
                 }
             }
 
-            // Already loaded with the profile, so no extra query per card.
-            Long ownPrice = profile.getUnlockPriceMinor();
-            long price = ownPrice != null ? ownPrice : monetization.profileUnlock().priceMinor();
-
-            return MemberCardResponse.of(profile, freePhotoUrls, freeVideoUrls,
-                    lockedPhotos, lockedVideos, liveHosts.contains(userId), isUnlocked,
-                    price, monetization.currency());
+            return MemberCardResponse.of(
+                    profile,
+                    freePhotoUrls,
+                    freeVideoUrls,
+                    lockedPhotos,
+                    lockedVideos,
+                    liveHosts.contains(userId),
+                    followed.contains(userId),
+                    cheapest,
+                    cheapest == null ? null : pricing.display(cheapest),
+                    packageService.searchPriorityOf(profile.getUser()),
+                    pricing.currency());
         });
     }
 
-    private Map<UUID, List<MediaAsset>> approvedMediaFor(List<UUID> userIds) {
+    private Map<UUID, List<MediaAsset>> groupByUser(List<MediaAsset> media) {
         Map<UUID, List<MediaAsset>> byUser = new HashMap<>();
-        for (MediaAsset asset : mediaRepository.findApprovedForUsers(userIds, MediaStatus.APPROVED)) {
+        for (MediaAsset asset : media) {
             byUser.computeIfAbsent(asset.getUser().getId(), k -> new ArrayList<>()).add(asset);
         }
         return byUser;

@@ -116,83 +116,102 @@ nightgals:
   monetization:
     # Master switch. false makes everything free and every paywall check pass.
     enabled: ${MONETIZATION_ENABLED:true}
-    currency: KES
+    # XAF has no minor unit: 5000 here is five thousand francs, not fifty.
+    # com.nightgals.common.Money is what knows that.
+    currency: XAF
     # auto   every purchase completes instantly and NOTHING IS COLLECTED. The
     #        happy path, so the product can be walked end to end without an
     #        administrator confirming each payment.
     # manual purchases stay PENDING until a human settles them.
-    #
-    # Neither takes money. Integrating M-Pesa Daraja or a card gateway means
-    # adding a PaymentProvider and naming it here; nothing else changes.
     provider: ${PAYMENT_PROVIDER:auto}
     # Shown when provider is manual. {amount} and {reference} are substituted.
     manual-payment-instructions: >-
-      Send {amount} to the Nightgals till and quote reference {reference}.
+      Send {amount} to the Noctyvera till and quote reference {reference}.
       Access is granted once our team confirms receipt.
-    profile-unlock:
-      # Minor units: 10000 = KES 100.00. Only a default - a creator who sets her
-      # own price overrides it, within the bounds below.
-      price-minor: 10000
-      duration: P30D
-      # KES 50.00 floor: below this the commission stops covering the payment fee.
-      min-price-minor: 5000
-      # KES 5000.00 ceiling: catches a mistyped extra zero.
+
+    # Every premium item is priced by its creator. These are the fallback for an
+    # item she never priced, and the bounds she has to stay inside.
+    item-pricing:
+      default-price-minor: 2000
+      # Below this the commission stops covering the payment fee.
+      min-price-minor: 500
+      # Catches a mistyped extra zero.
       max-price-minor: 500000
-    plans:
-      WEEKLY:
-        label: 1 week
-        price-minor: 30000
-        duration: P7D
-      MONTHLY:
-        label: 1 month
-        price-minor: 90000
-        duration: P30D
-      QUARTERLY:
-        label: 3 months
-        price-minor: 240000
-        duration: P90D
+      # How long a bought item stays unlocked. Blank means forever, which is the
+      # right default for something bought outright rather than rented.
+      access-duration:
+
+    # 7 days of full access on every new account: viewers see premium content,
+    # creators can publish, without paying for either.
+    free-trial: P7D
+
+    referral:
+      # Paid to the referrer when the referred account buys its FIRST package.
+      bonus-minor: 5000
 
   # What a creator pays the platform for the right to publish.
   #
-  # A limit of 0 means the package does not cover that media type at all, which
-  # is the whole difference between bronze and silver.
+  # Weekly, in XAF. Every package covers photos and video; what differs is how
+  # much, how long she may broadcast each day, and where she ranks in search.
   creator-packages:
-    # False makes publishing free and restores the old flat 9-photo / 3-video
-    # allowance. That is how the test suite runs.
+    # False makes publishing free and restores a flat allowance. That is how the
+    # test suite runs.
     enabled: ${CREATOR_PACKAGES_ENABLED:true}
     packages:
-      BRONZE:
-        label: Bronze
-        tagline: Photos only
-        # KES 500.00
-        price-minor: 50000
-        duration: P30D
-        max-photos: 12
-        max-videos: 0
-      SILVER:
-        label: Silver
-        tagline: Video only
-        # KES 1000.00
-        price-minor: 100000
-        duration: P30D
-        max-photos: 0
-        max-videos: 6
-      GOLD:
-        label: Gold
-        tagline: Photos and video
-        # KES 1500.00
-        price-minor: 150000
-        duration: P30D
+      PRO:
+        label: Pro
+        tagline: Standard boost in search
+        price-minor: 5000
+        duration: P7D
+        max-premium-videos: 2
+        max-photos: 20
+        live-minutes-per-day: 15
+        search-priority: 1
+      DIAMOND:
+        label: Diamond
+        tagline: Enhanced profile visibility
+        price-minor: 10000
+        duration: P7D
+        max-premium-videos: 5
         max-photos: 40
-        max-videos: 20
+        live-minutes-per-day: 45
+        search-priority: 2
+      BLACK_DIAMOND:
+        label: Black Diamond
+        tagline: Maximum visibility and promotion
+        price-minor: 15000
+        duration: P7D
+        max-premium-videos: 10
+        max-photos: 80
+        # Two hours.
+        live-minutes-per-day: 120
+        search-priority: 3
+
+  # Private 1-to-1 video calls.
+  calls:
+    enabled: ${CALLS_ENABLED:true}
+    # The durations a creator may price, in minutes. She picks which to offer.
+    allowed-durations: [5, 10, 15, 30, 45, 60]
+    # Bounds on what she may charge for one, whatever the length.
+    min-price-minor: 500
+    max-price-minor: 500000
+    # How far ahead a call can be booked, and the least notice it needs.
+    max-lead-time: P30D
+    min-notice: PT30M
+
+  live:
+    # How long before a scheduled broadcast its followers are emailed.
+    reminder-lead-time: PT30M
+    # Sweep that sends those reminders.
+    reminder-cron: "0 */5 * * * *"
 
   earnings:
     # The platform's cut of every payment. 30 means creators keep 70%.
     commission-percent: 30
     # New earnings stay unpayable for this long, so a refund can reverse them.
     hold-period: P7D
-    # Smallest payout that will be processed. 100000 = KES 1000.00
-    minimum-payout-minor: 100000
+    # Smallest payout that will be processed, in XAF.
+    minimum-payout-minor: 10000
     # Hourly sweep releasing earnings whose hold has elapsed.
     release-cron: "0 0 * * * *"
 

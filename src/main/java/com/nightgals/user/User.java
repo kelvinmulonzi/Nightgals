@@ -5,6 +5,10 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -66,6 +70,43 @@ public class User extends BaseEntity {
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 
+    /**
+     * When this account's 7 days of free access run out.
+     *
+     * <p>An expiry rather than a flag, so nothing has to end it: every check is
+     * a comparison against now, and a trial that has elapsed simply stops
+     * satisfying them.
+     */
+    @Column(name = "trial_ends_at")
+    private Instant trialEndsAt;
+
+    /** Public, shareable, and fixed for the life of the account. */
+    @Column(name = "referral_code", nullable = false, length = 12)
+    private String referralCode;
+
+    /**
+     * Who invited them. Set once at registration and never moved - letting it
+     * change later would let two people claim the same bonus.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "referred_by")
+    private User referredBy;
+
+    /**
+     * Guarantees the invite code the NOT NULL column requires.
+     *
+     * <p>{@link com.nightgals.referral.ReferralService} generates a checked-unique
+     * one during registration. This is the backstop for every other path that
+     * creates an account - the admin bootstrap, tests, a future import - none of
+     * which should have to remember.
+     */
+    @PrePersist
+    void ensureReferralCode() {
+        if (referralCode == null || referralCode.isBlank()) {
+            referralCode = com.nightgals.referral.ReferralCodes.random();
+        }
+    }
+
     public boolean isApproved() {
         return verificationStatus == VerificationStatus.APPROVED;
     }
@@ -76,6 +117,11 @@ public class User extends BaseEntity {
 
     public boolean isCreator() {
         return accountType == AccountType.CREATOR;
+    }
+
+    /** True while the free trial is still running. */
+    public boolean isOnTrial() {
+        return trialEndsAt != null && trialEndsAt.isAfter(Instant.now());
     }
 
 }

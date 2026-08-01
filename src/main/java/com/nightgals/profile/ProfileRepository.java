@@ -17,22 +17,49 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
 
     /**
      * The browse feed: verified, discoverable members other than the caller.
-     * Newest first, with an optional city filter.
      *
-     * <p>{@code city} must already be lower-cased by the caller, and the CAST is
-     * load-bearing: without it Postgres cannot infer the type of a null bind
-     * parameter and rejects the statement.
+     * <p>Ordered by <b>package rank first</b> - Black Diamond above Diamond above
+     * Pro above everyone else - and only then by recency. That is what "highest
+     * priority in search results and homepage listings" buys.
+     *
+     * <p>Native because the rank is a scalar subquery in ORDER BY, which JPQL
+     * cannot express portably. The subquery takes MAX so a creator holding two
+     * overlapping packages ranks by the better one and still yields one row -
+     * a join would duplicate her card.
+     *
+     * <p>{@code city} must already be lower-cased by the caller.
      */
-    @Query("""
-            SELECT p FROM Profile p
-            JOIN FETCH p.user u
-            WHERE u.verificationStatus = com.nightgals.user.VerificationStatus.APPROVED
-              AND u.status = com.nightgals.user.UserStatus.ACTIVE
-              AND p.discoverable = true
+    @Query(value = """
+            SELECT p.* FROM profiles p
+            JOIN users u ON u.id = p.user_id
+            WHERE u.verification_status = 'APPROVED'
+              AND u.status = 'ACTIVE'
+              AND p.discoverable = TRUE
               AND u.id <> :viewerId
-              AND (CAST(:city AS String) IS NULL OR LOWER(p.city) = :city)
-            ORDER BY p.createdAt DESC
-            """)
+              AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
+            ORDER BY COALESCE((
+                SELECT MAX(CASE cp.package_code
+                               WHEN 'BLACK_DIAMOND' THEN 3
+                               WHEN 'DIAMOND'       THEN 2
+                               WHEN 'PRO'           THEN 1
+                               ELSE 0 END)
+                FROM creator_packages cp
+                WHERE cp.creator_id = u.id
+                  AND cp.cancelled_at IS NULL
+                  AND cp.starts_at <= NOW()
+                  AND cp.expires_at > NOW()
+            ), 0) DESC, p.created_at DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM profiles p
+            JOIN users u ON u.id = p.user_id
+            WHERE u.verification_status = 'APPROVED'
+              AND u.status = 'ACTIVE'
+              AND p.discoverable = TRUE
+              AND u.id <> :viewerId
+              AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
+            """,
+            nativeQuery = true)
     Page<Profile> findFeed(@Param("viewerId") UUID viewerId,
                            @Param("city") String city,
                            Pageable pageable);

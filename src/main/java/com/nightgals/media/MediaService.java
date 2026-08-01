@@ -2,9 +2,9 @@ package com.nightgals.media;
 
 import com.nightgals.billing.CreatorPackageService;
 import com.nightgals.billing.EntitlementService;
+import com.nightgals.billing.ItemPricingService;
 import com.nightgals.common.ApiException;
 import com.nightgals.common.PageResponse;
-import com.nightgals.earnings.EarningsService;
 import com.nightgals.media.dto.MediaResponse;
 import com.nightgals.media.dto.MediaUpdateRequest;
 import com.nightgals.storage.StorageService;
@@ -41,13 +41,14 @@ public class MediaService {
     private final UploadValidator uploadValidator;
     private final EntitlementService entitlementService;
     private final CreatorPackageService creatorPackageService;
-    private final EarningsService earningsService;
+    private final ItemPricingService pricing;
 
     @Transactional
     public MediaResponse upload(User user, MediaType type, MultipartFile file,
-                                String caption, ContentTier tier) {
+                                String caption, ContentTier tier, Long priceMinor) {
         requireApproved(user);
-        creatorPackageService.requireCanPublish(user, type);
+        ContentTier requestedTier = tier == null ? ContentTier.EXCLUSIVE : tier;
+        creatorPackageService.requireCanPublish(user, type, requestedTier);
 
         if (type == MediaType.PHOTO) {
             uploadValidator.validateImage(file);
@@ -62,8 +63,7 @@ public class MediaService {
         // The first photo becomes the profile picture, and the profile picture is
         // always free - otherwise a creator's card would have no image and nobody
         // would have anything to judge them on.
-        ContentTier resolvedTier = firstPhoto ? ContentTier.FREE
-                : (tier == null ? ContentTier.EXCLUSIVE : tier);
+        ContentTier resolvedTier = firstPhoto ? ContentTier.FREE : requestedTier;
 
         MediaAsset asset = MediaAsset.builder()
                 .user(user)
@@ -74,6 +74,9 @@ public class MediaService {
                 .checksumSha256(stored.checksumSha256())
                 .caption(caption)
                 .tier(resolvedTier)
+                // Priced per item, by its creator. Null until she says otherwise,
+                // which means the platform default.
+                .unlockPriceMinor(resolvedTier == ContentTier.FREE ? null : pricing.validate(priceMinor))
                 .position((int) mediaRepository.countByUserIdAndType(user.getId(), type))
                 .primary(firstPhoto)
                 // Published straight away: passing KYC is what earns the right to
@@ -108,17 +111,16 @@ public class MediaService {
         List<MediaAsset> approved = mediaRepository
                 .findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(targetUserId, MediaStatus.APPROVED);
 
-        if (entitlementService.canViewPremium(viewer, targetUserId)) {
-            // A subscriber consuming this creator's paid content earns them a share
-            // of that subscriber's payment for the period.
-            if (approved.stream().anyMatch(a -> !a.isFree())) {
-                earningsService.recordPremiumView(viewer, targetUserId);
-            }
-            return approved.stream().map(MediaResponse::of).toList();
-        }
+        // One query for the whole gallery rather than one per tile.
+        var viewable = entitlementService.viewableAmong(viewer, approved);
 
         return approved.stream()
-                .map(asset -> asset.isFree() ? MediaResponse.of(asset) : MediaResponse.locked(asset))
+                .map(asset -> viewable.contains(asset.getId())
+                        ? MediaResponse.of(asset)
+                        // Locked tiles still carry their price: that is what turns a
+                        // blurred placeholder into something somebody buys.
+                        : MediaResponse.locked(asset, pricing.priceOf(asset),
+                                pricing.display(pricing.priceOf(asset)), pricing.currency()))
                 .toList();
     }
 
@@ -131,6 +133,9 @@ public class MediaService {
         }
         if (request.position() != null) {
             asset.setPosition(request.position());
+        }
+        if (request.unlockPriceMinor() != null) {
+            asset.setUnlockPriceMinor(pricing.validate(request.unlockPriceMinor()));
         }
         if (request.tier() != null) {
             if (asset.isPrimary() && request.tier() == ContentTier.EXCLUSIVE) {
@@ -182,13 +187,12 @@ public class MediaService {
             throw ApiException.notFound("Media");
         }
 
-        if (!owner && !staff && !asset.isFree()
-                && !entitlementService.canViewPremium(viewer, asset.getUser().getId())) {
+        if (!owner && !staff && !entitlementService.canView(viewer, asset)) {
             // Anonymous callers get 401 rather than 402: signing in is the next
             // step for them, not paying.
             throw viewer == null
-                    ? ApiException.unauthorized("Sign in to see more of this member")
-                    : ApiException.paymentRequired("Unlock this member to see their photos and video");
+                    ? ApiException.unauthorized("Sign in to see this")
+                    : ApiException.paymentRequired("Unlock this item to watch it");
         }
 
         return new MediaDownload(storageService.load(asset.getStorageKey()), asset.getContentType());

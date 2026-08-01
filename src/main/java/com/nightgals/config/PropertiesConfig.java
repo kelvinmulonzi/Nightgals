@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @EnableConfigurationProperties({JwtProperties.class, StorageProperties.class, AppProperties.class,
         MonetizationProperties.class, EarningsProperties.class, OtpProperties.class,
-        NotificationProperties.class, CreatorPackageProperties.class})
+        NotificationProperties.class, CreatorPackageProperties.class,
+        CallProperties.class, LiveProperties.class})
 public class PropertiesConfig {
 }

@@ -35,29 +35,37 @@ nightgals:
   # Publishing stays free, so the existing media tests keep exercising media
   # rules rather than package rules. CreatorPackageTest turns it on itself.
   creator-packages:
+    # Publishing stays free, so the older media tests keep testing media rules
+    # rather than package rules. CreatorPackageTest turns it on itself.
     enabled: false
     packages:
-      BRONZE:
-        label: Bronze
-        tagline: Photos only
-        price-minor: 50000
-        duration: P30D
-        max-photos: 12
-        max-videos: 0
-      SILVER:
-        label: Silver
-        tagline: Video only
-        price-minor: 100000
-        duration: P30D
-        max-photos: 0
-        max-videos: 6
-      GOLD:
-        label: Gold
-        tagline: Photos and video
-        price-minor: 150000
-        duration: P30D
+      PRO:
+        label: Pro
+        tagline: Standard boost in search
+        price-minor: 5000
+        duration: P7D
+        max-premium-videos: 2
+        max-photos: 20
+        live-minutes-per-day: 15
+        search-priority: 1
+      DIAMOND:
+        label: Diamond
+        tagline: Enhanced profile visibility
+        price-minor: 10000
+        duration: P7D
+        max-premium-videos: 5
         max-photos: 40
-        max-videos: 20
+        live-minutes-per-day: 45
+        search-priority: 2
+      BLACK_DIAMOND:
+        label: Black Diamond
+        tagline: Maximum visibility and promotion
+        price-minor: 15000
+        duration: P7D
+        max-premium-videos: 10
+        max-photos: 80
+        live-minutes-per-day: 120
+        search-priority: 3
 
   jwt:
     secret: test-only-secret-key-that-is-long-enough-for-hs256-abcdefgh
@@ -71,20 +79,32 @@ nightgals:
     document-hash-pepper: test-pepper
   monetization:
     enabled: true
-    currency: KES
+    currency: XAF
     # The suite drives settlement explicitly, so purchases must stay PENDING
     # until it says otherwise. AutoSettleTest overrides this for itself.
     provider: manual
-    profile-unlock:
-      price-minor: 10000
-      duration: P30D
-      min-price-minor: 5000
+    # Off by default: most tests predate it and would otherwise pass every
+    # paywall for free. TrialTest turns it on for itself.
+    free-trial:
+    item-pricing:
+      default-price-minor: 2000
+      min-price-minor: 500
       max-price-minor: 500000
-    plans:
-      MONTHLY:
-        label: 1 month
-        price-minor: 90000
-        duration: P30D
+    referral:
+      bonus-minor: 5000
+
+  calls:
+    enabled: true
+    allowed-durations: [5, 10, 15, 30, 45, 60]
+    min-price-minor: 500
+    max-price-minor: 500000
+    max-lead-time: P30D
+    min-notice: PT30M
+
+  live:
+    reminder-lead-time: PT30M
+    reminder-cron: "0 0 4 * * *"
+
   earnings:
     commission-percent: 30
     # Zero hold so tests can exercise payouts without waiting.

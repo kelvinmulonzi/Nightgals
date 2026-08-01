@@ -24,6 +24,14 @@ public record MeResponse(
         UserStatus status,
         VerificationStatus verificationStatus,
         boolean emailVerified,
+
+        @Schema(description = "True while the 7-day free trial is running")
+        boolean onTrial,
+        @Schema(description = "When the free trial ends") Instant trialEndsAt,
+
+        @Schema(description = "This account's invite code", example = "K7RBQ2XM")
+        String referralCode,
+
         boolean profileComplete,
         @Schema(description = "True once an administrator has approved this member's identity documents")
         boolean canPostMedia,
@@ -50,6 +58,9 @@ public record MeResponse(
                 user.getStatus(),
                 user.getVerificationStatus(),
                 user.isEmailVerified(),
+                user.isOnTrial(),
+                user.getTrialEndsAt(),
+                user.getReferralCode(),
                 profileComplete,
                 user.isApproved(),
                 nextStep(user, profileComplete),

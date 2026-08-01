@@ -3,6 +3,7 @@ package com.nightgals.earnings.dto;
 import com.nightgals.earnings.Payout;
 import com.nightgals.earnings.PayoutMethod;
 import com.nightgals.earnings.PayoutStatus;
+import com.nightgals.common.Money;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Instant;
@@ -37,7 +38,7 @@ public record PayoutResponse(
                 p.getCreator().getId(),
                 p.getCreator().getUsername(),
                 p.getAmountMinor(),
-                String.format("%.2f", p.getAmountMinor() / 100.0),
+                Money.plain(p.getAmountMinor(), p.getCurrency()),
                 p.getCurrency(),
                 p.getStatus(),
                 p.getMethod(),

@@ -58,7 +58,7 @@ public class MediaController {
             description = """
                     **Requires: APPROVED.**
 
-                    Up to 9 photos per creator.
+                    How many you may have posted at once comes from your package.
 
                     **`tier` decides who sees it.** `FREE` puts it in the shop window - visible
                     to anyone, including anonymous visitors. `EXCLUSIVE` (the default) puts it
@@ -87,9 +87,11 @@ public class MediaController {
             @Parameter(description = "The image file", required = true) @RequestPart("file") MultipartFile file,
             @Parameter(description = "Optional caption") @RequestParam(required = false) String caption,
             @Parameter(description = "FREE or EXCLUSIVE. Defaults to EXCLUSIVE.")
-            @RequestParam(required = false) ContentTier tier) {
+            @RequestParam(required = false) ContentTier tier,
+            @Parameter(description = "What a viewer pays for this one item. Null uses the platform default.")
+            @RequestParam(required = false) Long priceMinor) {
         return ResponseEntity.status(201)
-                .body(mediaService.upload(principal.user(), MediaType.PHOTO, file, caption, tier));
+                .body(mediaService.upload(principal.user(), MediaType.PHOTO, file, caption, tier, priceMinor));
     }
 
     @Operation(
@@ -97,7 +99,9 @@ public class MediaController {
             description = """
                     **Requires: APPROVED.**
 
-                    Up to 3 videos per creator. MP4, QuickTime or WebM.
+                    How many **premium** videos you may have posted at once comes from your package -
+                    2 on Pro, 5 on Diamond, 10 on Black Diamond. Videos marked `FREE` are the
+                    shop window and are not metered. MP4, QuickTime or WebM.
 
                     Same `tier` choice as photos: a `FREE` clip is a teaser anyone can watch,
                     `EXCLUSIVE` (the default) is what viewers pay for.
@@ -115,9 +119,11 @@ public class MediaController {
             @Parameter(description = "The video file", required = true) @RequestPart("file") MultipartFile file,
             @Parameter(description = "Optional caption") @RequestParam(required = false) String caption,
             @Parameter(description = "FREE or EXCLUSIVE. Defaults to EXCLUSIVE.")
-            @RequestParam(required = false) ContentTier tier) {
+            @RequestParam(required = false) ContentTier tier,
+            @Parameter(description = "What a viewer pays for this one video. Null uses the platform default.")
+            @RequestParam(required = false) Long priceMinor) {
         return ResponseEntity.status(201)
-                .body(mediaService.upload(principal.user(), MediaType.VIDEO, file, caption, tier));
+                .body(mediaService.upload(principal.user(), MediaType.VIDEO, file, caption, tier, priceMinor));
     }
 
     @Operation(summary = "List my media",

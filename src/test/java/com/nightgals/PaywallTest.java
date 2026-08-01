@@ -7,12 +7,14 @@ import com.nightgals.billing.EntitlementService;
 import com.nightgals.billing.PurchaseStatus;
 import com.nightgals.common.ApiException;
 import com.nightgals.discovery.FeedService;
-import com.nightgals.media.MediaRepository;
+import com.nightgals.discovery.dto.MemberCardResponse;
 import com.nightgals.media.ContentTier;
+import com.nightgals.media.MediaAsset;
+import com.nightgals.media.MediaRepository;
 import com.nightgals.media.MediaService;
-import com.nightgals.media.dto.MediaUpdateRequest;
 import com.nightgals.media.MediaStatus;
 import com.nightgals.media.MediaType;
+import com.nightgals.media.dto.MediaUpdateRequest;
 import com.nightgals.profile.Gender;
 import com.nightgals.profile.ProfileService;
 import com.nightgals.profile.dto.ProfileRequest;
@@ -24,22 +26,24 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Free to scroll, paid to see the person. Also covers the rule that only
- * verified members may browse at all.
+ * Free to look, paid to watch - and the unit of payment is the item.
+ *
+ * <p>What a creator marks FREE is the shop window, open to anyone signed in or
+ * not. What she marks EXCLUSIVE is sold one piece at a time, at the price she put
+ * on that piece. Buying one thing buys that thing.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -56,393 +60,377 @@ class PaywallTest {
     @Autowired UserRepository userRepository;
     @Autowired FeedService feedService;
 
+    // ---------------------------------------------------------------- the feed
+
     @Test
-    @DisplayName("The feed lists verified members, with and without a city filter")
+    @DisplayName("The feed lists creators, with and without a city filter")
     void feedListsMembers() {
-        User creator = approvedMember();
-        publishPhotos(creator, 3);
-        User viewer = approvedMember();
+        User creator = approvedCreator();
+        publish(creator, ContentTier.EXCLUSIVE, 9_000L);
+        publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
 
-        // No filter: the null city parameter must not break the query.
-        var unfiltered = feedService.feed(viewer, null, PageRequest.of(0, 20));
-        assertThat(unfiltered.content()).isNotEmpty();
-        var card = unfiltered.content().stream()
-                .filter(c -> c.userId().equals(creator.getId())).findFirst().orElseThrow();
-
-        // free-preview-photos is 1 in the test configuration
-        assertThat(card.freePhotoUrls()).hasSize(1);
-        assertThat(card.lockedPhotoCount()).isEqualTo(2);
-        assertThat(card.unlocked()).isFalse();
+        var card = cardFor(viewer, creator);
         assertThat(card.username()).isNotBlank();
+        assertThat(card.freePhotoUrls()).hasSize(1);          // the profile picture
+        assertThat(card.lockedPhotoCount()).isEqualTo(2);
+        // "From X" is the cheapest locked thing, not the first one found.
+        assertThat(card.fromPriceMinor()).isEqualTo(3_000L);
 
-        // Matching filter, case-insensitively.
-        assertThat(feedService.feed(viewer, "nairobi", PageRequest.of(0, 20)).content())
+        assertThat(feedService.feed(viewer, "nairobi", PageRequest.of(0, 50)).content())
                 .anySatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
-        // Non-matching filter.
-        assertThat(feedService.feed(viewer, "Kisumu", PageRequest.of(0, 20)).content())
+        assertThat(feedService.feed(viewer, "Kisumu", PageRequest.of(0, 50)).content())
                 .noneSatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
     }
 
     @Test
     @DisplayName("The feed never shows the caller their own card")
     void feedExcludesSelf() {
-        User viewer = approvedMember();
-        assertThat(feedService.feed(viewer, null, PageRequest.of(0, 20)).content())
+        User viewer = approvedCreator();
+        assertThat(feedService.feed(viewer, null, PageRequest.of(0, 50)).content())
                 .noneSatisfy(c -> assertThat(c.userId()).isEqualTo(viewer.getId()));
     }
 
     @Test
-    @DisplayName("Unlocking flips the card to fully visible")
-    void unlockRevealsCard() {
-        User creator = approvedMember();
-        publishPhotos(creator, 3);
-        User viewer = approvedMember();
+    @DisplayName("Buying one item changes only that item's count on the card")
+    void cardReflectsWhatIsOwned() {
+        User creator = approvedCreator();
+        UUID first = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
 
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
-        billingService.settle(checkout.purchase().id(), "TEST-FEED-1");
+        assertThat(cardFor(viewer, creator).lockedPhotoCount()).isEqualTo(2);
 
-        var card = feedService.feed(reload(viewer), null, PageRequest.of(0, 20)).content().stream()
-                .filter(c -> c.userId().equals(creator.getId())).findFirst().orElseThrow();
+        buy(viewer, first);
 
-        assertThat(card.unlocked()).isTrue();
-        assertThat(card.freePhotoUrls()).hasSize(3);
-        assertThat(card.lockedPhotoCount()).isZero();
+        var after = cardFor(reload(viewer), creator);
+        assertThat(after.lockedPhotoCount()).isEqualTo(1);
+        assertThat(after.freePhotoUrls()).hasSize(2);         // cover + the one bought
     }
 
+    // ---------------------------------------------------------------- browsing
+
     @Test
-    @DisplayName("A viewer needs no verification to browse - KYC is a creator requirement")
+    @DisplayName("A viewer needs no verification to browse or to pay")
     void viewersDoNotNeedVerification() {
-        User creator = approvedMember();
-        publishPhotos(creator, 3);
-        User viewer = register();   // registered, never did KYC
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();   // registered, never did KYC
 
         assertThat(profileService.getPublic(creator.getId(), viewer).username()).isNotBlank();
-        assertThat(feedService.feed(viewer, null, PageRequest.of(0, 20)).content())
+        assertThat(feedService.feed(viewer, null, PageRequest.of(0, 50)).content())
                 .anySatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
 
-        // ...and they can pay, still without ever verifying.
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
-        billingService.settle(checkout.purchase().id(), "VIEWER-NO-KYC");
-        assertThat(mediaService.listPublic(creator.getId(), reload(viewer)))
-                .allSatisfy(m -> assertThat(m.locked()).isFalse());
+        buy(viewer, item);
+        assertThat(entitlementService.canView(reload(viewer), asset(item))).isTrue();
     }
 
     @Test
-    @DisplayName("An anonymous visitor sees the shop window: cards, profile, one preview photo")
+    @DisplayName("An anonymous visitor sees the shop window and nothing past it")
     void anonymousSeesShopWindow() {
-        User creator = approvedMember();
-        var assets = publishPhotos(creator, 3);
-        publishVideo(creator);
+        User creator = approvedCreator();
+        UUID paid = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        UUID cover = mediaService.listOwn(creator.getId()).getFirst().id();
 
-        // null viewer == anonymous
-        var feed = feedService.feed(null, null, PageRequest.of(0, 20));
-        var card = feed.content().stream()
-                .filter(c -> c.userId().equals(creator.getId())).findFirst().orElseThrow();
+        var card = cardFor(null, creator);
         assertThat(card.freePhotoUrls()).hasSize(1);
-        assertThat(card.lockedPhotoCount()).isEqualTo(2);
-        assertThat(card.lockedVideoCount()).isEqualTo(1);
-        assertThat(card.unlocked()).isFalse();
+        assertThat(card.lockedPhotoCount()).isEqualTo(1);
 
         var profile = profileService.getPublic(creator.getId(), null);
         assertThat(profile.username()).isNotBlank();
-        // Still no identifying detail leaks to the open internet.
+        // No identifying detail leaks to the open internet.
         assertThat(profile.displayName()).isNull();
         assertThat(profile.dateOfBirth()).isNull();
 
-        var gallery = mediaService.listPublic(creator.getId(), null);
-        assertThat(gallery.stream().filter(m -> !m.locked()).toList()).hasSize(1);
-        assertThat(gallery.stream().filter(m -> m.locked()).toList()).hasSize(3);
-
-        // The one free preview really is fetchable without a token...
-        assertThat(mediaService.download(assets.getFirst(), null)).isNotNull();
-        // ...and nothing past it is.
-        assertThatThrownBy(() -> mediaService.download(assets.get(1), null))
+        // The free item really is fetchable without a token...
+        assertThat(mediaService.download(cover, null)).isNotNull();
+        // ...and nothing paid is.
+        assertThatThrownBy(() -> mediaService.download(paid, null))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Sign in");
     }
 
     @Test
-    @DisplayName("Anonymous callers hold no entitlements even with the paywall switched off")
+    @DisplayName("An anonymous caller is entitled to nothing paid")
     void anonymousNeverEntitled() {
-        User creator = approvedMember();
-        assertThat(entitlementService.canViewPremium(null, creator.getId())).isFalse();
-        assertThat(entitlementService.unlockedAmong(null, java.util.List.of(creator.getId()))).isEmpty();
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+
+        assertThat(entitlementService.canView(null, asset(item))).isFalse();
+        assertThat(entitlementService.viewableAmong(null, java.util.List.of(asset(item)))).isEmpty();
     }
+
+    // ---------------------------------------------------------------- tiers
 
     @Test
     @DisplayName("A KYC-approved creator's uploads are live immediately, with no review step")
     void uploadsPublishImmediately() {
-        User creator = approvedMember();
-        var uploaded = mediaService.upload(reload(creator), MediaType.PHOTO,
-                file("p.jpg", "image/jpeg"), "straight up", ContentTier.FREE);
+        User creator = approvedCreator();
+        var uploaded = mediaService.upload(reload(creator), MediaType.PHOTO, photo(),
+                "straight up", ContentTier.FREE, null);
 
         assertThat(uploaded.status()).isEqualTo(MediaStatus.APPROVED);
         assertThat(uploaded.locked()).isFalse();
-        // Visible to an anonymous passer-by the moment it lands.
-        assertThat(mediaService.listPublic(creator.getId(), null)).hasSize(1);
     }
 
     @Test
-    @DisplayName("A creator chooses per item what is free and what is exclusive")
-    void creatorChoosesTierPerItem() {
-        User creator = approvedMember();
-        // First photo is the profile picture and is forced FREE.
-        var first = mediaService.upload(reload(creator), MediaType.PHOTO,
-                file("a.jpg", "image/jpeg"), null, ContentTier.EXCLUSIVE);
+    @DisplayName("The first photo becomes the profile picture and is forced free")
+    void firstPhotoIsTheCover() {
+        User creator = freshCreator();
+
+        var first = mediaService.upload(reload(creator), MediaType.PHOTO, photo(),
+                null, ContentTier.EXCLUSIVE, 9_000L);
+
         assertThat(first.tier()).isEqualTo(ContentTier.FREE);
         assertThat(first.primary()).isTrue();
-
-        // A second one honours what was asked for.
-        var teaser = mediaService.upload(reload(creator), MediaType.PHOTO,
-                file("b.jpg", "image/jpeg"), null, ContentTier.FREE);
-        var paid = mediaService.upload(reload(creator), MediaType.PHOTO,
-                file("c.jpg", "image/jpeg"), null, ContentTier.EXCLUSIVE);
-        var freeClip = mediaService.upload(reload(creator), MediaType.VIDEO,
-                file("v.mp4", "video/mp4"), null, ContentTier.FREE);
-        assertThat(teaser.tier()).isEqualTo(ContentTier.FREE);
-        assertThat(paid.tier()).isEqualTo(ContentTier.EXCLUSIVE);
-
-        // Anonymous: two free photos and the free clip play, the exclusive one does not.
-        var gallery = mediaService.listPublic(creator.getId(), null);
-        assertThat(gallery.stream().filter(m -> !m.locked()).toList()).hasSize(3);
-        assertThat(gallery.stream().filter(m -> m.locked()).toList()).hasSize(1);
-        assertThat(mediaService.download(teaser.id(), null)).isNotNull();
-        assertThat(mediaService.download(freeClip.id(), null)).isNotNull();
-        assertThatThrownBy(() -> mediaService.download(paid.id(), null))
-                .isInstanceOf(ApiException.class);
+        // A free item is the shop window and is never priced.
+        assertThat(asset(first.id()).getUnlockPriceMinor()).isNull();
     }
 
     @Test
     @DisplayName("A creator can move an item between free and exclusive after posting")
     void tierCanBeChangedLater() {
-        User creator = approvedMember();
-        var ids = publishPhotos(creator, 2);
-        UUID second = ids.get(1);
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
 
-        assertThat(mediaService.listPublic(creator.getId(), null).stream()
-                .filter(m -> !m.locked()).toList()).hasSize(1);
+        assertThat(freeCount(creator)).isEqualTo(1);
 
-        // Promote the exclusive one into the shop window.
-        var moved = mediaService.update(reload(creator), second,
-                new MediaUpdateRequest(null, null, ContentTier.FREE, null));
-        assertThat(moved.tier()).isEqualTo(ContentTier.FREE);
-        assertThat(mediaService.listPublic(creator.getId(), null).stream()
-                .filter(m -> !m.locked()).toList()).hasSize(2);
+        mediaService.update(reload(creator), item,
+                new MediaUpdateRequest(null, null, ContentTier.FREE, null, null));
+        assertThat(freeCount(creator)).isEqualTo(2);
 
-        // And back again.
-        mediaService.update(reload(creator), second,
-                new MediaUpdateRequest(null, null, ContentTier.EXCLUSIVE, null));
-        assertThat(mediaService.listPublic(creator.getId(), null).stream()
-                .filter(m -> m.locked()).toList()).hasSize(1);
+        mediaService.update(reload(creator), item,
+                new MediaUpdateRequest(null, null, ContentTier.EXCLUSIVE, null, null));
+        assertThat(freeCount(creator)).isEqualTo(1);
     }
 
     @Test
     @DisplayName("The profile picture cannot be hidden behind the paywall")
     void primaryPhotoStaysFree() {
-        User creator = approvedMember();
-        var ids = publishPhotos(creator, 2);
+        User creator = approvedCreator();
+        UUID cover = mediaService.listOwn(creator.getId()).getFirst().id();
+        UUID other = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
 
-        assertThatThrownBy(() -> mediaService.update(reload(creator), ids.getFirst(),
-                new MediaUpdateRequest(null, null, ContentTier.EXCLUSIVE, null)))
+        assertThatThrownBy(() -> mediaService.update(reload(creator), cover,
+                new MediaUpdateRequest(null, null, ContentTier.EXCLUSIVE, null, null)))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("profile picture has to stay free");
 
         // Making a different photo primary forces it free.
-        var promoted = mediaService.update(reload(creator), ids.get(1),
-                new MediaUpdateRequest(null, null, null, true));
+        var promoted = mediaService.update(reload(creator), other,
+                new MediaUpdateRequest(null, null, null, true, null));
         assertThat(promoted.tier()).isEqualTo(ContentTier.FREE);
         assertThat(promoted.primary()).isTrue();
     }
 
+    // ---------------------------------------------------------------- files
+
+    @Test
+    @DisplayName("Fetching a locked file is 401 anonymous, 402 signed in")
+    void downloadIsGated() {
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
+
+        // Signing in is the next step for a visitor; paying is the next step for
+        // somebody who already has an account.
+        assertThatThrownBy(() -> mediaService.download(item, null))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Sign in");
+
+        assertThatThrownBy(() -> mediaService.download(item, viewer))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Unlock this item");
+
+        buy(viewer, item);
+        assertThat(mediaService.download(item, reload(viewer))).isNotNull();
+    }
+
+    @Test
+    @DisplayName("A creator never pays to see her own content")
+    void ownContentIsFree() {
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+
+        assertThat(entitlementService.canView(reload(creator), asset(item))).isTrue();
+        assertThat(mediaService.download(item, reload(creator))).isNotNull();
+        assertThatThrownBy(() -> billingService.unlockMedia(reload(creator), item))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("already yours");
+    }
+
+    // ---------------------------------------------------------------- buying
+
+    @Test
+    @DisplayName("Buying one item does not open her others")
+    void purchaseIsScopedToTheItem() {
+        User creator = approvedCreator();
+        UUID bought = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        UUID other = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
+
+        buy(viewer, bought);
+
+        assertThat(entitlementService.canView(reload(viewer), asset(bought))).isTrue();
+        // The whole point of per-item pricing.
+        assertThat(entitlementService.canView(reload(viewer), asset(other))).isFalse();
+    }
+
+    @Test
+    @DisplayName("Access is granted when the purchase settles, not when it is created")
+    void pendingPurchaseGrantsNothing() {
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
+
+        var checkout = billingService.unlockMedia(viewer, item);
+
+        assertThat(checkout.purchase().status()).isEqualTo(PurchaseStatus.PENDING);
+        assertThat(entitlementService.canView(reload(viewer), asset(item))).isFalse();
+    }
+
+    @Test
+    @DisplayName("Settling twice does not grant twice")
+    void settlementIsIdempotent() {
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
+
+        var checkout = billingService.unlockMedia(viewer, item);
+        billingService.settle(checkout.purchase().id(), "REF");
+        var second = billingService.settle(checkout.purchase().id(), "REF");
+
+        assertThat(second.status()).isEqualTo(PurchaseStatus.COMPLETED);
+        assertThat(billingService.entitlements(reload(viewer)).unlockedItems()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Buying the same item twice is refused")
+    void doubleBuyRefused() {
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
+        buy(viewer, item);
+
+        assertThatThrownBy(() -> billingService.unlockMedia(reload(viewer), item))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("already have this");
+    }
+
+    @Test
+    @DisplayName("A free item cannot be bought")
+    void freeItemsAreNotForSale() {
+        User creator = approvedCreator();
+        UUID cover = mediaService.listOwn(creator.getId()).getFirst().id();
+
+        assertThatThrownBy(() -> billingService.unlockMedia(viewer(), cover))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("free to watch");
+    }
+
+    @Test
+    @DisplayName("The purchase count is of items, not of creators")
+    void entitlementsCountItems() {
+        User creator = approvedCreator();
+        User viewer = viewer();
+        buy(viewer, publish(creator, ContentTier.EXCLUSIVE, 3_000L));
+        buy(reload(viewer), publish(creator, ContentTier.EXCLUSIVE, 3_000L));
+
+        // Two items from one creator is two, not one.
+        assertThat(billingService.entitlements(reload(viewer)).unlockedItems()).isEqualTo(2);
+    }
+
+    // ---------------------------------------------------------------- moderation
+
     @Test
     @DisplayName("A moderator can take published media down, and put it back")
     void takedownAndRestore() {
-        User creator = approvedMember();
-        var ids = publishPhotos(creator, 2);
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
         assertThat(mediaService.listPublic(creator.getId(), null)).hasSize(2);
 
-        var removed = mediaService.takeDown(ids.getFirst(), "Contains someone else's face");
+        var removed = mediaService.takeDown(item, "Contains someone else's face");
         assertThat(removed.status()).isEqualTo(MediaStatus.REJECTED);
-        assertThat(removed.rejectionReason()).isEqualTo("Contains someone else's face");
         assertThat(mediaService.listPublic(creator.getId(), null)).hasSize(1);
-
         // The creator still sees it, with the reason.
         assertThat(mediaService.listOwn(creator.getId())).hasSize(2);
 
-        mediaService.restore(ids.getFirst());
+        mediaService.restore(item);
         assertThat(mediaService.listPublic(creator.getId(), null)).hasSize(2);
     }
 
     @Test
     @DisplayName("A takedown must say why")
     void takedownNeedsReason() {
-        User creator = approvedMember();
-        var ids = publishPhotos(creator, 1);
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
 
-        assertThatThrownBy(() -> mediaService.takeDown(ids.getFirst(), "   "))
+        assertThatThrownBy(() -> mediaService.takeDown(item, "   "))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Say why");
     }
 
-    @Test
-    @DisplayName("A verified member sees the free preview and locked placeholders")
-    void previewIsFreeRestIsLocked() {
-        User creator = approvedMember();
-        publishPhotos(creator, 3);
-        publishVideo(creator);
+    // ---------------------------------------------------------------- helpers
 
-        User viewer = approvedMember();
-        var gallery = mediaService.listPublic(creator.getId(), viewer);
-
-        assertThat(gallery).hasSize(4);
-        // free-preview-photos is 1 in the test configuration
-        assertThat(gallery.stream().filter(m -> !m.locked()).toList()).hasSize(1);
-        assertThat(gallery.stream().filter(m -> !m.locked()).toList().getFirst().url()).isNotNull();
-        assertThat(gallery.stream().filter(m -> m.locked()).toList()).hasSize(3);
-        assertThat(gallery.stream().filter(m -> m.locked()).toList())
-                .allSatisfy(m -> assertThat(m.url()).isNull());
+    private void buy(User viewer, UUID mediaId) {
+        var checkout = billingService.unlockMedia(reload(viewer), mediaId);
+        billingService.settle(checkout.purchase().id(), null);
     }
 
-    @Test
-    @DisplayName("Fetching a locked file is refused with 402 until it is unlocked")
-    void lockedFileRequiresPayment() {
-        User creator = approvedMember();
-        var assets = publishPhotos(creator, 2);
-        UUID lockedId = assets.get(1);
-
-        User viewer = approvedMember();
-        assertThatThrownBy(() -> mediaService.download(lockedId, viewer))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("Unlock this member");
-
-        // Paying settles the purchase and opens it.
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
-        assertThat(checkout.purchase().status()).isEqualTo(PurchaseStatus.PENDING);
-        billingService.settle(checkout.purchase().id(), "TEST-REF-1");
-
-        assertThat(mediaService.download(lockedId, reload(viewer))).isNotNull();
+    private UUID publish(User creator, ContentTier tier, Long priceMinor) {
+        return mediaService.upload(reload(creator), MediaType.PHOTO, photo(),
+                null, tier, priceMinor).id();
     }
 
-    @Test
-    @DisplayName("Access is granted only when the purchase settles, not when it is created")
-    void pendingPurchaseGrantsNothing() {
-        User creator = approvedMember();
-        User viewer = approvedMember();
-
-        billingService.unlockProfile(viewer, creator.getId());
-        assertThat(entitlementService.canViewPremium(reload(viewer), creator.getId())).isFalse();
+    private long freeCount(User creator) {
+        return mediaService.listPublic(creator.getId(), null).stream()
+                .filter(m -> !m.locked()).count();
     }
 
-    @Test
-    @DisplayName("A subscription unlocks everybody")
-    void subscriptionUnlocksEveryone() {
-        User first = approvedMember();
-        User second = approvedMember();
-        publishPhotos(first, 2);
-        publishPhotos(second, 2);
-
-        User viewer = approvedMember();
-        assertThat(entitlementService.canViewPremium(viewer, first.getId())).isFalse();
-
-        var checkout = billingService.subscribe(viewer, "MONTHLY");
-        billingService.settle(checkout.purchase().id(), "TEST-SUB-1");
-
-        User subscribed = reload(viewer);
-        assertThat(entitlementService.canViewPremium(subscribed, first.getId())).isTrue();
-        assertThat(entitlementService.canViewPremium(subscribed, second.getId())).isTrue();
-        assertThat(mediaService.listPublic(first.getId(), subscribed))
-                .allSatisfy(m -> assertThat(m.locked()).isFalse());
+    private MemberCardResponse cardFor(User viewer, User creator) {
+        return feedService.feed(viewer, null, PageRequest.of(0, 50)).content().stream()
+                .filter(c -> c.userId().equals(creator.getId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("creator missing from the feed"));
     }
 
-    @Test
-    @DisplayName("Settling twice does not grant twice")
-    void settlementIsIdempotent() {
-        User creator = approvedMember();
-        User viewer = approvedMember();
-
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
-        billingService.settle(checkout.purchase().id(), "TEST-REF-2");
-        var second = billingService.settle(checkout.purchase().id(), "TEST-REF-2");
-
-        assertThat(second.status()).isEqualTo(PurchaseStatus.COMPLETED);
-        assertThat(billingService.entitlements(reload(viewer)).unlockedMembers()).hasSize(1);
+    private MediaAsset asset(UUID id) {
+        return mediaRepository.findById(id).orElseThrow();
     }
 
-    @Test
-    @DisplayName("Unlocking a member you already have access to is refused")
-    void doubleUnlockRefused() {
-        User creator = approvedMember();
-        User viewer = approvedMember();
-
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
-        billingService.settle(checkout.purchase().id(), "TEST-REF-3");
-
-        User unlocked = reload(viewer);
-        assertThatThrownBy(() -> billingService.unlockProfile(unlocked, creator.getId()))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("already have access");
+    private MockMultipartFile photo() {
+        return new MockMultipartFile("file", "p.jpg", "image/jpeg", new byte[] {1, 2, 3, 4});
     }
 
-    @Test
-    @DisplayName("A member never pays to see their own content")
-    void ownContentIsFree() {
-        User creator = approvedMember();
-        var assets = publishPhotos(creator, 3);
+    /** Verified and discoverable, but with nothing posted yet. */
+    private User freshCreator() {
+        String email = "creator-" + UUID.randomUUID() + "@example.com";
+        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR, null), null);
+        User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
 
-        assertThat(entitlementService.canViewPremium(creator, creator.getId())).isTrue();
-        assertThat(mediaService.download(assets.get(2), creator)).isNotNull();
-        assertThatThrownBy(() -> billingService.unlockProfile(creator, creator.getId()))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("your own profile");
-    }
-
-    @Test
-    @DisplayName("An unknown plan code is refused")
-    void unknownPlanRefused() {
-        User viewer = approvedMember();
-        assertThatThrownBy(() -> billingService.subscribe(viewer, "LIFETIME"))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("No such plan");
-    }
-
-    // ------------------------------------------------------------- helpers
-
-    private User register() {
-        String email = "user-" + UUID.randomUUID() + "@example.com";
-        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR), null);
-        return userRepository.findByEmailIgnoreCase(email).orElseThrow();
-    }
-
-    private User approvedMember() {
-        User user = register();
         profileService.createOrUpdate(user, new ProfileRequest(
                 null, "Out most weekends", LocalDate.of(1996, 5, 5),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+
         User managed = reload(user);
         managed.setVerificationStatus(VerificationStatus.APPROVED);
-        return userRepository.save(managed);
+        return userRepository.saveAndFlush(managed);
     }
 
-    /**
-     * Publishes photos and returns their ids in order. The first is the profile
-     * picture and is therefore FREE; the rest are EXCLUSIVE.
-     */
-    private List<UUID> publishPhotos(User user, int count) {
-        return java.util.stream.IntStream.range(0, count)
-                .mapToObj(i -> mediaService.upload(reload(user), MediaType.PHOTO,
-                        file("p.jpg", "image/jpeg"), null, ContentTier.EXCLUSIVE).id())
-                .collect(java.util.stream.Collectors.toList());
+    /** As above, but the forced-free profile picture is already used up. */
+    private User approvedCreator() {
+        User creator = freshCreator();
+        mediaService.upload(creator, MediaType.PHOTO, photo(), null, ContentTier.FREE, null);
+        return reload(creator);
     }
 
-    private void publishVideo(User user) {
-        mediaService.upload(reload(user), MediaType.VIDEO, file("v.mp4", "video/mp4"), null, ContentTier.EXCLUSIVE);
+    private User viewer() {
+        String email = "viewer-" + UUID.randomUUID() + "@example.com";
+        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.VIEWER, null), null);
+        return userRepository.findByEmailIgnoreCase(email).orElseThrow();
     }
 
     private User reload(User user) {
         return userRepository.findById(user.getId()).orElseThrow();
-    }
-
-    private MockMultipartFile file(String name, String contentType) {
-        return new MockMultipartFile("file", name, contentType, new byte[]{1, 2, 3, 4});
     }
 }

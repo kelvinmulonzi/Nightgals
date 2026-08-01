@@ -62,14 +62,14 @@ class OnboardingFlowTest {
         User member = registerMember();
 
         // 1. Unverified: posting is refused.
-        assertThatThrownBy(() -> mediaService.upload(member, MediaType.PHOTO, photo(), null, ContentTier.EXCLUSIVE))
+        assertThatThrownBy(() -> mediaService.upload(member, MediaType.PHOTO, photo(), null, ContentTier.EXCLUSIVE, null))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Verify your identity");
 
         // 2. Profile, then KYC details.
         profileService.createOrUpdate(member, new ProfileRequest(
                 "Amina", "Afrobeats and rooftop bars", LocalDate.of(1998, 4, 12),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                Gender.FEMALE, "Nairobi", "Kenya", null, null));
 
         var submission = kycService.startOrUpdate(member, new KycSubmissionRequest(
                 DocumentType.NATIONAL_ID, "Amina Wanjiru Kamau",
@@ -93,7 +93,7 @@ class OnboardingFlowTest {
         assertThat(reload(member).getVerificationStatus()).isEqualTo(VerificationStatus.PENDING_REVIEW);
 
         // 4. Still cannot post while waiting.
-        assertThatThrownBy(() -> mediaService.upload(reload(member), MediaType.PHOTO, photo(), null, ContentTier.EXCLUSIVE))
+        assertThatThrownBy(() -> mediaService.upload(reload(member), MediaType.PHOTO, photo(), null, ContentTier.EXCLUSIVE, null))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("still being reviewed");
 
@@ -103,7 +103,7 @@ class OnboardingFlowTest {
         assertThat(reload(member).getVerificationStatus()).isEqualTo(VerificationStatus.APPROVED);
 
         // 6. Now the upload succeeds, and publishes immediately - KYC was the gate.
-        var uploaded = mediaService.upload(reload(member), MediaType.PHOTO, photo(), "Saturday night", ContentTier.EXCLUSIVE);
+        var uploaded = mediaService.upload(reload(member), MediaType.PHOTO, photo(), "Saturday night", ContentTier.EXCLUSIVE, null);
         assertThat(uploaded.status().name()).isEqualTo("APPROVED");
         assertThat(uploaded.locked()).isFalse();
         assertThat(uploaded.primary()).isTrue();
@@ -118,7 +118,7 @@ class OnboardingFlowTest {
         User member = registerMember();
         profileService.createOrUpdate(member, new ProfileRequest(
                 "Brian", null, LocalDate.of(1995, 1, 1),
-                Gender.MALE, "Nairobi", "Kenya", null, null, null));
+                Gender.MALE, "Nairobi", "Kenya", null, null));
         kycService.startOrUpdate(member, new KycSubmissionRequest(
                 DocumentType.PASSPORT, "Brian Otieno", LocalDate.of(1995, 1, 1), "KE", "P99887766"));
         kycService.uploadDocument(member, DocumentKind.PASSPORT_PAGE, photo());
@@ -131,7 +131,7 @@ class OnboardingFlowTest {
 
         assertThat(decided.rejectionReason()).isEqualTo(RejectionReason.DOCUMENT_UNREADABLE);
         assertThat(reload(member).getVerificationStatus()).isEqualTo(VerificationStatus.REJECTED);
-        assertThatThrownBy(() -> mediaService.upload(reload(member), MediaType.PHOTO, photo(), null, ContentTier.EXCLUSIVE))
+        assertThatThrownBy(() -> mediaService.upload(reload(member), MediaType.PHOTO, photo(), null, ContentTier.EXCLUSIVE, null))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("not successful");
     }
@@ -142,7 +142,7 @@ class OnboardingFlowTest {
         User member = registerMember();
         profileService.createOrUpdate(member, new ProfileRequest(
                 "Cate", null, LocalDate.of(1999, 6, 6),
-                Gender.FEMALE, "Mombasa", "Kenya", null, null, null));
+                Gender.FEMALE, "Mombasa", "Kenya", null, null));
 
         assertThatThrownBy(() -> kycService.startOrUpdate(member, new KycSubmissionRequest(
                 DocumentType.NATIONAL_ID, "Cate Njeri", LocalDate.of(1997, 6, 6), "KE", "12345678")))
@@ -156,7 +156,7 @@ class OnboardingFlowTest {
         User member = registerMember();
         assertThatThrownBy(() -> profileService.createOrUpdate(member, new ProfileRequest(
                 "Kid", null, LocalDate.now().minusYears(16),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null, null)))
+                Gender.FEMALE, "Nairobi", "Kenya", null, null)))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("at least 18");
     }
@@ -168,7 +168,7 @@ class OnboardingFlowTest {
         User staff = createStaff(VerificationStatus.UNVERIFIED);
         profileService.createOrUpdate(staff, new ProfileRequest(
                 "Mod", null, LocalDate.of(1990, 2, 2),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                Gender.FEMALE, "Nairobi", "Kenya", null, null));
         kycService.startOrUpdate(staff, new KycSubmissionRequest(
                 DocumentType.PASSPORT, "Mod Erator", LocalDate.of(1990, 2, 2), "KE", "P11112222"));
         kycService.uploadDocument(staff, DocumentKind.PASSPORT_PAGE, photo());
@@ -185,7 +185,7 @@ class OnboardingFlowTest {
 
     private User registerMember() {
         String email = "member-" + UUID.randomUUID() + "@example.com";
-        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR), null);
+        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR, null), null);
         return userRepository.findByEmailIgnoreCase(email).orElseThrow();
     }
 

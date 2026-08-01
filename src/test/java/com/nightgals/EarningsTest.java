@@ -64,103 +64,6 @@ class EarningsTest {
     @Autowired UserRepository userRepository;
 
     @Test
-    @DisplayName("An unlock credits the creator its net, and the platform its commission")
-    void unlockCreditsCreator() {
-        User creator = approvedMember();
-        User viewer = approvedMember();
-
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
-        billingService.settle(checkout.purchase().id(), "REF-1");
-
-        var ledger = payoutService.ledger(creator.getId(), PageRequest.of(0, 10));
-        assertThat(ledger.content()).hasSize(1);
-        var entry = ledger.content().getFirst();
-
-        // Unlock price is 10000 minor units in test config; 30% commission.
-        assertThat(entry.type()).isEqualTo(EarningType.UNLOCK);
-        assertThat(entry.grossMinor()).isEqualTo(10000);
-        assertThat(entry.commissionMinor()).isEqualTo(3000);
-        assertThat(entry.netMinor()).isEqualTo(7000);
-        assertThat(entry.grossMinor() - entry.commissionMinor()).isEqualTo(entry.netMinor());
-    }
-
-    @Test
-    @DisplayName("Settling the same unlock twice credits the creator once")
-    void earningIsNotDuplicatedOnReplay() {
-        User creator = approvedMember();
-        User viewer = approvedMember();
-
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
-        billingService.settle(checkout.purchase().id(), "REF-2");
-        billingService.settle(checkout.purchase().id(), "REF-2");
-
-        assertThat(payoutService.ledger(creator.getId(), PageRequest.of(0, 10)).content()).hasSize(1);
-        assertThat(payoutService.summary(reload(creator)).lifetimeMinor()).isEqualTo(7000);
-    }
-
-    @Test
-    @DisplayName("A subscriber's payment is split among the creators they actually viewed")
-    void subscriptionSplitsAcrossViewedCreators() {
-        User first = approvedMember();
-        User second = approvedMember();
-        User ignored = approvedMember();
-        publishPhoto(first);
-        publishPhoto(second);
-        publishPhoto(ignored);
-
-        User subscriber = approvedMember();
-        var checkout = billingService.subscribe(subscriber, "MONTHLY");
-        billingService.settle(checkout.purchase().id(), "SUB-1");
-
-        // The subscriber looks at two of the three creators.
-        mediaService.listPublic(first.getId(), reload(subscriber));
-        mediaService.listPublic(second.getId(), reload(subscriber));
-
-        int created = earningsService.distributeSubscriptionRevenue(EarningsService.currentPeriod());
-        assertThat(created).isEqualTo(2);
-
-        // Plan is 90000 minor; net after 30% is 63000; split two ways = 31500 each.
-        assertThat(payoutService.summary(reload(first)).lifetimeMinor()).isEqualTo(31500);
-        assertThat(payoutService.summary(reload(second)).lifetimeMinor()).isEqualTo(31500);
-        assertThat(payoutService.summary(reload(ignored)).lifetimeMinor()).isZero();
-    }
-
-    @Test
-    @DisplayName("Viewing a creator repeatedly does not multiply their share")
-    void repeatedViewsCountOnce() {
-        User creator = approvedMember();
-        publishPhoto(creator);
-
-        User subscriber = approvedMember();
-        var checkout = billingService.subscribe(subscriber, "MONTHLY");
-        billingService.settle(checkout.purchase().id(), "SUB-2");
-
-        for (int i = 0; i < 5; i++) {
-            mediaService.listPublic(creator.getId(), reload(subscriber));
-        }
-
-        earningsService.distributeSubscriptionRevenue(EarningsService.currentPeriod());
-        assertThat(payoutService.ledger(creator.getId(), PageRequest.of(0, 10)).content()).hasSize(1);
-        assertThat(payoutService.summary(reload(creator)).lifetimeMinor()).isEqualTo(63000);
-    }
-
-    @Test
-    @DisplayName("Re-running distribution does not pay the same share twice")
-    void distributionIsIdempotent() {
-        User creator = approvedMember();
-        publishPhoto(creator);
-        User subscriber = approvedMember();
-        var checkout = billingService.subscribe(subscriber, "MONTHLY");
-        billingService.settle(checkout.purchase().id(), "SUB-3");
-        mediaService.listPublic(creator.getId(), reload(subscriber));
-
-        String period = EarningsService.currentPeriod();
-        assertThat(earningsService.distributeSubscriptionRevenue(period)).isEqualTo(1);
-        assertThat(earningsService.distributeSubscriptionRevenue(period)).isZero();
-        assertThat(payoutService.summary(reload(creator)).lifetimeMinor()).isEqualTo(63000);
-    }
-
-    @Test
     @DisplayName("A payout moves the balance to reserved, then paid")
     void payoutLifecycle() {
         User creator = earningCreator(2);
@@ -268,7 +171,7 @@ class EarningsTest {
     void refundReversesEarning() {
         User creator = approvedMember();
         User viewer = approvedMember();
-        var checkout = billingService.unlockProfile(viewer, creator.getId());
+        var checkout = billingService.unlockMedia(viewer, pricedItem(creator, 10_000L));
         billingService.settle(checkout.purchase().id(), "REF-4");
 
         assertThat(payoutService.summary(reload(creator)).availableMinor()).isEqualTo(7000);
@@ -299,13 +202,15 @@ class EarningsTest {
     }
 
     @Test
-    @DisplayName("A creator earns nothing from viewing their own content")
+    @DisplayName("A creator earns nothing from looking at her own content")
     void ownViewsEarnNothing() {
         User creator = approvedMember();
         publishPhoto(creator);
+
+        // Her own items are never paywalled to her, so there is nothing to buy and
+        // nothing to earn - which is what stops a creator farming her own ledger.
         mediaService.listPublic(creator.getId(), reload(creator));
 
-        earningsService.distributeSubscriptionRevenue(EarningsService.currentPeriod());
         assertThat(payoutService.summary(reload(creator)).lifetimeMinor()).isZero();
     }
 
@@ -313,7 +218,7 @@ class EarningsTest {
 
     private User register() {
         String email = "user-" + UUID.randomUUID() + "@example.com";
-        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR), null);
+        authService.register(new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR, null), null);
         return userRepository.findByEmailIgnoreCase(email).orElseThrow();
     }
 
@@ -321,7 +226,7 @@ class EarningsTest {
         User user = register();
         profileService.createOrUpdate(user, new ProfileRequest(
                 null, "Out most weekends", LocalDate.of(1996, 5, 5),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null, null));
+                Gender.FEMALE, "Nairobi", "Kenya", null, null));
         User managed = reload(user);
         managed.setVerificationStatus(VerificationStatus.APPROVED);
         return userRepository.save(managed);
@@ -340,7 +245,7 @@ class EarningsTest {
         User creator = approvedMember();
         for (int i = 0; i < unlocks; i++) {
             User viewer = approvedMember();
-            var checkout = billingService.unlockProfile(viewer, creator.getId());
+            var checkout = billingService.unlockMedia(viewer, pricedItem(creator, 10_000L));
             billingService.settle(checkout.purchase().id(), "REF-" + UUID.randomUUID());
         }
         return creator;
@@ -351,13 +256,17 @@ class EarningsTest {
      * exclusive photo. Subscription revenue is only attributed when a subscriber
      * consumes *paid* content, so a creator with nothing exclusive earns nothing.
      */
+    private MockMultipartFile photo() {
+        return new MockMultipartFile("file", "p.jpg", "image/jpeg", new byte[]{1, 2, 3});
+    }
+
     private void publishPhoto(User user) {
         mediaService.upload(reload(user), MediaType.PHOTO,
                 new MockMultipartFile("file", "free.jpg", "image/jpeg", new byte[]{1, 2, 3}), null,
-                ContentTier.FREE);
+                ContentTier.FREE, null);
         mediaService.upload(reload(user), MediaType.PHOTO,
                 new MockMultipartFile("file", "paid.jpg", "image/jpeg", new byte[]{4, 5, 6}), null,
-                ContentTier.EXCLUSIVE);
+                ContentTier.EXCLUSIVE, null);
     }
 
     private PayoutAccountRequest account() {
@@ -366,5 +275,18 @@ class EarningsTest {
 
     private User reload(User user) {
         return userRepository.findById(user.getId()).orElseThrow();
+    }
+
+    /**
+     * A priced item on this creator's profile.
+     *
+     * <p>Publishes twice: the first photo is forced FREE because it becomes the
+     * profile picture, so the second is the one that can actually be sold.
+     */
+    private java.util.UUID pricedItem(User creator, long priceMinor) {
+        mediaService.upload(reload(creator), MediaType.PHOTO, photo(),
+                null, com.nightgals.media.ContentTier.FREE, null);
+        return mediaService.upload(reload(creator), MediaType.PHOTO, photo(),
+                null, com.nightgals.media.ContentTier.EXCLUSIVE, priceMinor).id();
     }
 }

@@ -70,6 +70,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/profile").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/media").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/live").permitAll()
+                        // The calendar is a shop window too: somebody should be able
+                        // to see what is on before deciding to sign up for it.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/live/upcoming").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/members/*/call-rates").permitAll()
                         // Without this the preview URLs above would be dead links.
                         // MediaService still refuses anything past the free preview.
                         .requestMatchers(HttpMethod.GET, "/api/v1/media/*/file").permitAll()
