@@ -240,7 +240,6 @@ nightgals:
     # How long identity documents are kept after a decision is recorded.
     kyc-retention: P90D
     purge-cron: "0 30 3 * * *"
-
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
