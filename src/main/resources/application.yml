@@ -152,7 +152,13 @@ nightgals:
 
     # 7 days of full access on every new account: viewers see premium content,
     # creators can publish, without paying for either.
-    free-trial: P7D
+    #
+    # Set FREE_TRIAL=PT0S to switch it off. Worth knowing when testing payments:
+    # a trial account is already entitled to everything, so buying one item comes
+    # back 409 `already_unlocked` and the paywall never appears. Creator packages
+    # and paid calls are unaffected - those are not entitlement-gated.
+#    P7D
+    free-trial: ${FREE_TRIAL:PT0S}
 
     referral:
       # Paid to the referrer when the referred account buys its FIRST package.

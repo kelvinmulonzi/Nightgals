@@ -203,7 +203,14 @@ public class MediaController {
                         download.contentType() == null
                                 ? org.springframework.http.MediaType.APPLICATION_OCTET_STREAM_VALUE
                                 : download.contentType()))
-                .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600")
+                // Play it, do not save it. Without this the browser is free to treat
+                // the response as a file - and an octet-stream fallback in particular
+                // pops a save dialog rather than rendering. There is no filename on
+                // purpose: naming it invites a "Save as" with the name filled in.
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                // Private, and never on a shared cache. A paid item must not survive
+                // in a proxy where the next person to ask gets it without paying.
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store, max-age=0")
                 .body(download.resource());
     }
 }

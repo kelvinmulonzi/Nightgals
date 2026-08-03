@@ -463,13 +463,20 @@ public class BillingService {
 
     @Transactional(readOnly = true)
     public EntitlementResponse entitlements(User viewer) {
+        long credit = creditService.balanceOf(viewer.getId());
+        String provider = paymentProvider.name();
         return new EntitlementResponse(
                 viewer.isOnTrial(),
                 viewer.getTrialEndsAt(),
                 mediaUnlockRepository.countByViewerId(viewer.getId()),
-                creditService.balanceOf(viewer.getId()),
-                Money.plain(creditService.balanceOf(viewer.getId()), properties.currency()),
-                properties.currency());
+                credit,
+                Money.plain(credit, properties.currency()),
+                properties.currency(),
+                provider,
+                // Asked from the provider's own name rather than from configuration,
+                // so swapping the bean cannot leave the client asking for a number
+                // nobody will charge - or worse, not asking for one that is required.
+                "MOMO".equals(provider));
     }
 
     @Transactional(readOnly = true)

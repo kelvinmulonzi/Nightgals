@@ -22,5 +22,17 @@ public record EntitlementResponse(
 
         @Schema(description = "Spendable referral credit, in minor units") long creditBalanceMinor,
         @Schema(example = "5000") String creditBalanceDisplay,
-        @Schema(example = "XAF") String currency) {
+        @Schema(example = "XAF") String currency,
+
+        @Schema(description = "Which provider takes the money: AUTO, MANUAL or MOMO", example = "MOMO")
+        String paymentProvider,
+
+        @Schema(description = """
+                Whether checkout has to collect a Mobile Money number.
+
+                True only on a mobile-money provider. The others ignore the field, so
+                a client that never asks is not broken - it just discovers the problem
+                at the point of payment rather than before it.
+                """)
+        boolean requiresPayerMsisdn) {
 }
