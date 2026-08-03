@@ -102,11 +102,23 @@ public class CallController {
 
                     Refused if she is already booked for any part of that window - overlap,
                     not just an identical start time.
+
+                    **Paying by Mobile Money.** Send `payerMsisdn` in the body. The response
+                    comes back with `action: PROMPT_ON_PHONE` and the purchase still
+                    `PENDING` - a prompt has gone to that handset and nobody has approved it
+                    yet. The slot is held meanwhile, so there is no race with another viewer.
+                    Poll `GET /api/v1/billing/purchases` until the purchase reaches
+                    `COMPLETED` or `FAILED`; a prompt nobody answers is abandoned as
+                    `FAILED` rather than holding the slot forever.
                     """)
     @ApiResponse(responseCode = "200", description = "Booked; follow the payment instructions")
-    @ApiResponse(responseCode = "400", description = "She does not offer that length, or the time is out of bounds",
+    @ApiResponse(responseCode = "400",
+            description = "She does not offer that length, the time is out of bounds, or "
+                    + "`msisdn_required` - mobile money needs a `payerMsisdn`",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "She is already booked then",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "The mobile-money provider is not responding",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/members/{userId}/calls")
     public CheckoutResponse book(@AuthenticationPrincipal AuthUser principal,

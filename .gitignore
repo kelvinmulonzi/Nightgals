@@ -35,4 +35,4 @@ build/
 # Nightgals
 var/storage/
 # Real credentials. .env.example is the committed template; this never is.
-.env
+
