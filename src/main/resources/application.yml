@@ -2,6 +2,13 @@ spring:
   application:
     name: Nightgals
 
+  # Reads .env from the working directory, so `cp .env.example .env` is all a
+  # fresh clone needs. Optional: tests, and any deployment that injects real
+  # environment variables, run fine without the file. Real environment variables
+  # take precedence over anything in it.
+  config:
+    import: optional:file:.env[.properties]
+
   # Spring Boot starts compose.yaml automatically on `./mvnw spring-boot:run`
   # and wires the datasource to it. Set enabled=false to point at an external DB.
   docker:
@@ -35,10 +42,12 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
 
-  # Outbound SMTP. The credentials below are a throwaway Gmail app password for
-  # development; a real deployment sets MAIL_* from its secret store, and should
-  # move to a transactional provider (SES, Postmark) before it has real volume -
-  # Gmail rate-limits and will eventually treat this as suspicious.
+  # Outbound SMTP. No default credential lives here on purpose: one used to, it
+  # was published with the repository, and Google revoked it - which presents as
+  # nobody being able to sign in, since sign-in codes go by mail. Set MAIL_* in
+  # .env locally and from a secret store in production, and move to a
+  # transactional provider (SES, Postmark) before real volume - Gmail rate-limits
+  # and will eventually treat this as suspicious.
   mail:
     host: ${MAIL_HOST:smtp.gmail.com}
     port: ${MAIL_PORT:587}
@@ -187,6 +196,33 @@ nightgals:
         live-minutes-per-day: 120
         search-priority: 3
 
+  # MTN Mobile Money. Only wired in when monetization.provider=momo; every bean
+  # in com.nightgals.billing.momo is conditional on it, so leaving the provider
+  # as auto or manual costs nothing.
+  #
+  # Sandbox credentials are self-service at https://momodeveloper.mtn.com:
+  # subscribe to Collections for the subscription key, then mint an API user and
+  # key over the API. Production credentials come from MTN Cameroon directly,
+  # along with the real target-environment name.
+  momo:
+    base-url: ${MOMO_BASE_URL:https://sandbox.momodeveloper.mtn.com}
+    subscription-key: ${MOMO_SUBSCRIPTION_KEY:}
+    api-user: ${MOMO_API_USER:}
+    api-key: ${MOMO_API_KEY:}
+    target-environment: ${MOMO_TARGET_ENVIRONMENT:sandbox}
+    # EUR is not a typo. Sandbox rejects everything else, including the XAF this
+    # product actually prices in. Switch to XAF at the same time as the
+    # target-environment, not before.
+    currency: ${MOMO_CURRENCY:EUR}
+    # Must be public HTTPS, so blank on a laptop - reconciliation covers it.
+    callback-url: ${MOMO_CALLBACK_URL:}
+    token-refresh-margin: PT5M
+    reconcile-cron: "0 */2 * * * *"
+    reconcile-window: PT1H
+    # Scaffolding until viewers supply their own number at checkout. Blank this
+    # before production or one person is billed for everyone else's purchases.
+    sandbox-payer-msisdn: ${MOMO_SANDBOX_PAYER_MSISDN:}
+
   # Private 1-to-1 video calls.
   calls:
     enabled: ${CALLS_ENABLED:true}
@@ -223,7 +259,9 @@ nightgals:
     # Set BOOTSTRAP_ADMIN_PASSWORD to create the first admin on an empty database.
     # Nothing is created while this is blank.
     admin-email: ${BOOTSTRAP_ADMIN_EMAIL:admin@nightgals.local}
-    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:admin-password-1}
+    # Blank on purpose. A default here means every deployment that forgets to set
+    # it gets a superadmin whose password is published in this repository.
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
 
   storage:
     # s3 for object storage (AWS in production, MinIO locally - same protocol),
@@ -275,6 +313,13 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+  health:
+    # Spring opens a real SMTP connection on every /actuator/health call, and
+    # health backs readiness - so a slow or unreachable mail provider pulls the
+    # instance out of the load balancer over a dependency that only sends email.
+    # Sign-in already surfaces mail failures on its own, loudly.
+    mail:
+      enabled: false
 
 logging:
   level:

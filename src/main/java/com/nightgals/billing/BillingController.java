@@ -1,6 +1,7 @@
 package com.nightgals.billing;
 
 import com.nightgals.billing.dto.BuyPackageRequest;
+import com.nightgals.billing.dto.CheckoutRequest;
 import com.nightgals.billing.dto.CheckoutResponse;
 import com.nightgals.billing.dto.CreatorPackageResponse;
 import com.nightgals.billing.dto.CreatorPackageStatusResponse;
@@ -78,18 +79,31 @@ public class BillingController {
                     opening a second one, and the price is fixed when that purchase is
                     created: a creator changing hers mid-checkout does not change what
                     you are charged.
+
+                    **Paying by Mobile Money.** Send `payerMsisdn` in the body. The
+                    response comes back with `action: PROMPT_ON_PHONE` and the purchase
+                    still `PENDING` - a prompt has gone to that handset and nobody has
+                    approved it yet. Poll `GET /api/v1/billing/purchases` until the
+                    purchase reaches `COMPLETED` or `FAILED`; every few seconds is
+                    enough, and an unanswered prompt is abandoned as `FAILED` rather
+                    than staying pending forever.
                     """)
     @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
-    @ApiResponse(responseCode = "400", description = "It is free, or it is your own",
+    @ApiResponse(responseCode = "400",
+            description = "It is free, it is your own, or `msisdn_required` - "
+                    + "mobile money needs a `payerMsisdn`",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "No such item",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "Already owned, or monetisation is off",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "The mobile-money provider is not responding",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/media/{mediaId}")
     public CheckoutResponse unlockMedia(@AuthenticationPrincipal AuthUser principal,
-                                        @PathVariable UUID mediaId) {
-        return billingService.unlockMedia(principal.user(), mediaId);
+                                        @PathVariable UUID mediaId,
+                                        @Valid @RequestBody(required = false) CheckoutRequest request) {
+        return billingService.unlockMedia(principal.user(), mediaId, msisdnOf(request));
     }
 
     @Operation(
@@ -97,14 +111,32 @@ public class BillingController {
             description = """
                     Each stream carries its own access price, set by its host. Buying one
                     grants the playback URL for that stream and nothing else.
+
+                    **Paying by Mobile Money.** Send `payerMsisdn` in the body. The
+                    response comes back with `action: PROMPT_ON_PHONE` and the purchase
+                    still `PENDING` - a prompt has gone to that handset and nobody has
+                    approved it yet. Poll `GET /api/v1/billing/purchases` until the
+                    purchase reaches `COMPLETED` or `FAILED`; every few seconds is
+                    enough, and an unanswered prompt is abandoned as `FAILED` rather
+                    than staying pending forever.
                     """)
     @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
-    @ApiResponse(responseCode = "400", description = "It is open to everyone, or it is your own",
+    @ApiResponse(responseCode = "400",
+            description = "It is open to everyone, it is your own, or `msisdn_required` - "
+                    + "mobile money needs a `payerMsisdn`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "The mobile-money provider is not responding",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/live/{sessionId}")
     public CheckoutResponse buyLiveAccess(@AuthenticationPrincipal AuthUser principal,
-                                          @PathVariable UUID sessionId) {
-        return billingService.buyLiveAccess(principal.user(), sessionId);
+                                          @PathVariable UUID sessionId,
+                                          @Valid @RequestBody(required = false) CheckoutRequest request) {
+        return billingService.buyLiveAccess(principal.user(), sessionId, msisdnOf(request));
+    }
+
+    /** The body is optional, so it may not be there at all. */
+    private static String msisdnOf(CheckoutRequest request) {
+        return request == null ? null : request.payerMsisdn();
     }
 
     // ------------------------------------------------------------ creators pay
@@ -157,16 +189,29 @@ public class BillingController {
 
                     If somebody referred this account, their bonus is credited when this -
                     their **first** package - settles.
+
+                    **Paying by Mobile Money.** Send `payerMsisdn` in the body. The
+                    response comes back with `action: PROMPT_ON_PHONE` and the purchase
+                    still `PENDING` - a prompt has gone to that handset and nobody has
+                    approved it yet. Poll `GET /api/v1/billing/purchases` until the
+                    purchase reaches `COMPLETED` or `FAILED`; every few seconds is
+                    enough, and an unanswered prompt is abandoned as `FAILED` rather
+                    than staying pending forever.
                     """)
     @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
-    @ApiResponse(responseCode = "400", description = "Unknown package code",
+    @ApiResponse(responseCode = "400",
+            description = "Unknown package code, or `msisdn_required` - "
+                    + "mobile money needs a `payerMsisdn`",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "Creator packages are switched off here",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "The mobile-money provider is not responding",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/creator-packages")
     public CheckoutResponse buyCreatorPackage(@AuthenticationPrincipal AuthUser principal,
                                               @Valid @RequestBody BuyPackageRequest request) {
-        return billingService.buyCreatorPackage(principal.user(), request.packageCode());
+        return billingService.buyCreatorPackage(principal.user(), request.packageCode(),
+                request.payerMsisdn());
     }
 
     // ------------------------------------------------------------ reads

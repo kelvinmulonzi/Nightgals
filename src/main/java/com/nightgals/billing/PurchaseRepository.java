@@ -15,6 +15,9 @@ public interface PurchaseRepository extends JpaRepository<Purchase, UUID> {
 
     Optional<Purchase> findByProviderAndProviderReference(String provider, String providerReference);
 
+    /** What the mobile-money sweep chases: payments started but never confirmed. */
+    java.util.List<Purchase> findByStatusAndProvider(PurchaseStatus status, String provider);
+
     @Query("""
             SELECT p FROM Purchase p
             JOIN FETCH p.user

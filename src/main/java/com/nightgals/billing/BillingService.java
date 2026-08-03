@@ -67,9 +67,14 @@ public class BillingService {
 
     // ---------------------------------------------------------------- buying
 
+    /** A viewer buying one photo or video, paying by a means that needs no details. */
+    public CheckoutResponse unlockMedia(User buyer, UUID mediaId) {
+        return unlockMedia(buyer, mediaId, null);
+    }
+
     /** A viewer buying one photo or video. */
     @Transactional
-    public CheckoutResponse unlockMedia(User buyer, UUID mediaId) {
+    public CheckoutResponse unlockMedia(User buyer, UUID mediaId, String payerMsisdn) {
         requireMonetisationOn();
 
         MediaAsset asset = mediaRepository.findById(mediaId)
@@ -102,12 +107,17 @@ public class BillingService {
                         .provider(paymentProvider.name())
                         .build()));
 
-        return checkout(buyer, purchase);
+        return checkout(buyer, purchase, payerMsisdn);
+    }
+
+    /** A viewer buying entry to one broadcast, paying by a means that needs no details. */
+    public CheckoutResponse buyLiveAccess(User buyer, UUID sessionId) {
+        return buyLiveAccess(buyer, sessionId, null);
     }
 
     /** A viewer buying entry to one broadcast. */
     @Transactional
-    public CheckoutResponse buyLiveAccess(User buyer, UUID sessionId) {
+    public CheckoutResponse buyLiveAccess(User buyer, UUID sessionId, String payerMsisdn) {
         requireMonetisationOn();
 
         LiveSession session = liveSessionRepository.findById(sessionId)
@@ -134,7 +144,7 @@ public class BillingService {
                         .provider(paymentProvider.name())
                         .build()));
 
-        return checkout(buyer, purchase);
+        return checkout(buyer, purchase, payerMsisdn);
     }
 
     /**
@@ -143,8 +153,12 @@ public class BillingService {
      * <p>Created by {@code CallService}, which owns the slot and the price; this
      * only takes the money for it.
      */
-    @Transactional
     public CheckoutResponse payForCall(User buyer, VideoCall call) {
+        return payForCall(buyer, call, null);
+    }
+
+    @Transactional
+    public CheckoutResponse payForCall(User buyer, VideoCall call, String payerMsisdn) {
         requireMonetisationOn();
 
         Purchase purchase = purchaseRepository.findPendingForCall(buyer.getId(), call.getId())
@@ -158,7 +172,7 @@ public class BillingService {
                         .provider(paymentProvider.name())
                         .build()));
 
-        return checkout(buyer, purchase);
+        return checkout(buyer, purchase, payerMsisdn);
     }
 
     /**
@@ -168,8 +182,12 @@ public class BillingService {
      * documents are in review means the package is live the moment they are
      * approved, rather than adding a second wait to the end of the first.
      */
-    @Transactional
     public CheckoutResponse buyCreatorPackage(User creator, String packageCode) {
+        return buyCreatorPackage(creator, packageCode, null);
+    }
+
+    @Transactional
+    public CheckoutResponse buyCreatorPackage(User creator, String packageCode, String payerMsisdn) {
         CreatorPackageCode code = creatorPackageService.parseCode(packageCode);
         if (!creatorPackageService.packagesRequired()) {
             throw ApiException.conflict("packages_disabled",
@@ -187,7 +205,22 @@ public class BillingService {
                 .provider(paymentProvider.name())
                 .build());
 
-        return checkout(creator, purchase);
+        return checkout(creator, purchase, payerMsisdn);
+    }
+
+    /**
+     * Digits only, so `+237 689 686 224` and `237689686224` are one number.
+     *
+     * <p>Deliberately not validating the country or length here - the shape is
+     * checked at the edge, and a payment provider rejecting a number it does not
+     * recognise is a better error than this guessing which numbers exist.
+     */
+    private static String normaliseMsisdn(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String digits = raw.replaceAll("[^0-9]", "");
+        return digits.isBlank() ? null : digits;
     }
 
     // ---------------------------------------------------------------- checkout
@@ -200,7 +233,16 @@ public class BillingService {
      * settles. That is the whole point of credit being spendable "toward
      * subscriptions or unlocking premium features".
      */
-    private CheckoutResponse checkout(User buyer, Purchase purchase) {
+    private CheckoutResponse checkout(User buyer, Purchase purchase, String payerMsisdn) {
+        // Set on every attempt, not only the first. A purchase left PENDING is
+        // reused when the buyer tries again, and the second attempt may well be
+        // from a different handset - the number recorded should be the one being
+        // charged now, not the one that already failed.
+        String normalised = normaliseMsisdn(payerMsisdn);
+        if (normalised != null) {
+            purchase.setPayerMsisdn(normalised);
+        }
+
         CreditService.Applied credit = creditService.applyTo(buyer, purchase);
         purchase.setCreditAppliedMinor(credit.creditUsedMinor());
 

@@ -39,6 +39,11 @@ public class SecurityConfig {
             "/api/v1/auth/logout",
             "/api/v1/usernames/suggestions",
             "/api/v1/billing/plans",
+            // MTN has no credential of ours to present, so this cannot be
+            // authenticated. It is safe only because the handler treats the body
+            // as a rumour and re-reads the real status from MTN before settling
+            // anything - see MomoCallbackController.
+            "/api/v1/webhooks/momo",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",

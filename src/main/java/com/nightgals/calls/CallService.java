@@ -142,7 +142,7 @@ public class CallService {
 
         // Billing flips the booking to CONFIRMED when the money lands, whether that
         // is inside this call or a webhook tomorrow.
-        CheckoutResponse checkout = billingService.payForCall(viewer, call);
+        CheckoutResponse checkout = billingService.payForCall(viewer, call, request.payerMsisdn());
         if (call.getStatus() == CallStatus.CONFIRMED) {
             announce(call);
         }

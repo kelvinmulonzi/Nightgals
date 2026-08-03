@@ -93,6 +93,17 @@ public class Purchase extends BaseEntity {
     @Column(name = "provider_reference", length = 120)
     private String providerReference;
 
+    /**
+     * The number a mobile-money prompt goes to, in international format without
+     * a leading plus - 237689686224.
+     *
+     * <p>On the purchase rather than the account on purpose: someone may pay
+     * from a different handset than the one they signed up with, and the number
+     * that was actually charged is what a dispute needs to see.
+     */
+    @Column(name = "payer_msisdn", length = 20)
+    private String payerMsisdn;
+
     @Column(name = "failure_reason", length = 200)
     private String failureReason;
 
