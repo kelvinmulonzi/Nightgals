@@ -18,8 +18,15 @@ public record BookCallRequest(
         @NotNull @Future Instant scheduledFor,
 
         @Schema(description = """
+                Which payment method to use, from `GET /api/v1/billing/payment-methods`.
+                `MOMO` for MTN Mobile Money, `STRIPE` (or its alias `CARD`) for a card.
+                Omit to use the platform default.
+                """, example = "MOMO")
+        String method,
+
+        @Schema(description = """
                 The Mobile Money number to charge, in international format. Required
-                when the platform is on a mobile-money provider, ignored otherwise.
+                when `method` is a mobile-money one, ignored otherwise.
                 """, example = "237689686224")
         @Pattern(regexp = "^\\+?[0-9][0-9 ()-]{7,19}$",
                 message = "must be a phone number in international format")

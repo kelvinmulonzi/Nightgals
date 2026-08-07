@@ -128,11 +128,26 @@ nightgals:
     # XAF has no minor unit: 5000 here is five thousand francs, not fifty.
     # com.nightgals.common.Money is what knows that.
     currency: XAF
+    # Every payment method on offer, in the order the picker should show them.
+    # More than one runs at once and the buyer chooses per checkout, so this is a
+    # list rather than a switch:
+    #
+    # momo   MTN Mobile Money. A prompt goes to the payer's handset.
+    # stripe Cards, on a Stripe-hosted page. Needs STRIPE_SECRET_KEY.
+    # manual purchases stay PENDING until a human settles them.
     # auto   every purchase completes instantly and NOTHING IS COLLECTED. The
     #        happy path, so the product can be walked end to end without an
     #        administrator confirming each payment.
-    # manual purchases stay PENDING until a human settles them.
-    provider: ${PAYMENT_PROVIDER:auto}
+    # Blank on purpose: blank falls through to `provider` below, and if that is
+    # blank too the auto-settling provider registers on its own. Setting a
+    # default here would override the legacy property instead of deferring to it.
+    providers: ${PAYMENT_PROVIDERS:}
+    # What a checkout that names no method gets - every client written before the
+    # picker existed. Defaults to the first entry above.
+    default-provider: ${DEFAULT_PAYMENT_PROVIDER:}
+    # Superseded by `providers`, still read when that is unset so that older
+    # deployments and the test suite keep working unchanged.
+    provider: ${PAYMENT_PROVIDER:}
     # Shown when provider is manual. {amount} and {reference} are substituted.
     manual-payment-instructions: >-
       Send {amount} to the Noctyvera till and quote reference {reference}.
@@ -228,6 +243,39 @@ nightgals:
     # Scaffolding until viewers supply their own number at checkout. Blank this
     # before production or one person is billed for everyone else's purchases.
     sandbox-payer-msisdn: ${MOMO_SANDBOX_PAYER_MSISDN:}
+
+  # Cards, through Stripe's hosted Checkout. Only wired in when `stripe` is one
+  # of monetization.providers above; every bean in com.nightgals.billing.stripe
+  # is conditional on it, so leaving it out costs nothing.
+  #
+  # Card details never touch this server - the payer completes a page on
+  # Stripe's domain and is redirected back - which keeps the platform entirely
+  # out of PCI scope. The cost is a trip out of the app and back.
+  #
+  # Keys are at https://dashboard.stripe.com/apikeys. The publishable key is
+  # public by design; the secret key is the account, so it belongs in the
+  # environment and never in this file. Test and live keys are separate worlds:
+  # move the secret, the publishable key and the webhook secret together.
+  stripe:
+    secret-key: ${STRIPE_SECRET_KEY:}
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+    # From the endpoint's own page in the dashboard, NOT the API keys page, and
+    # different for every endpoint. Settlement by webhook is refused while this
+    # is blank - reconciliation below still settles, just minutes later instead
+    # of seconds.
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    # Where Stripe returns the payer. {purchaseId} is substituted. Deep links on
+    # mobile. Arriving here proves nothing - the destination must still poll the
+    # purchase, because a payer can reach it by pressing back.
+    success-url: ${STRIPE_SUCCESS_URL:${APP_BASE_URL:http://localhost:5173}/checkout/done?purchase={purchaseId}}
+    cancel-url: ${STRIPE_CANCEL_URL:${APP_BASE_URL:http://localhost:5173}/checkout/cancelled?purchase={purchaseId}}
+    # How long the hosted page stays payable. Stripe permits 30m to 24h and
+    # rejects anything else, so this is clamped rather than passed through.
+    session-ttl: PT2H
+    reconcile-cron: "0 */2 * * * *"
+    # Must exceed session-ttl: a page Stripe still considers payable must not be
+    # failed underneath the payer.
+    reconcile-window: P1D
 
   # Private 1-to-1 video calls.
   calls:

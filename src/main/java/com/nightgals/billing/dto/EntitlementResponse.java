@@ -24,15 +24,24 @@ public record EntitlementResponse(
         @Schema(example = "5000") String creditBalanceDisplay,
         @Schema(example = "XAF") String currency,
 
-        @Schema(description = "Which provider takes the money: AUTO, MANUAL or MOMO", example = "MOMO")
+        @Schema(description = """
+                The payment method a checkout gets when it names none - `MOMO`,
+                `STRIPE`, `MANUAL` or `AUTO`.
+
+                The **default**, not the only one: several run at once and the buyer
+                chooses per purchase by sending `method`. For the full list, with
+                labels to render, call `GET /api/v1/billing/payment-methods`.
+                """, example = "MOMO")
         String paymentProvider,
 
         @Schema(description = """
-                Whether checkout has to collect a Mobile Money number.
+                Whether checkout has to collect a Mobile Money number *for the default
+                method above*. Methods that ignore the field are not broken by a client
+                that always sends it.
 
-                True only on a mobile-money provider. The others ignore the field, so
-                a client that never asks is not broken - it just discovers the problem
-                at the point of payment rather than before it.
+                Only describes the default. A client that lets the buyer pick should
+                read `requiresPayerMsisdn` from the payment-methods list instead, since
+                the answer differs per method.
                 """)
         boolean requiresPayerMsisdn) {
 }

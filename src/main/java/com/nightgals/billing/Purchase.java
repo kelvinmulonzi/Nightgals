@@ -89,8 +89,16 @@ public class Purchase extends BaseEntity {
     @Column(nullable = false, length = 30)
     private String provider;
 
-    /** The provider's id for this payment; unique per provider. */
-    @Column(name = "provider_reference", length = 120)
+    /**
+     * The provider's id for this payment; unique per provider.
+     *
+     * <p>What it holds shifts as the payment progresses, and differs by provider:
+     * MTN uses the purchase id throughout and replaces it with the financial
+     * transaction id on success, while Stripe holds the Checkout Session id
+     * ({@code cs_...}) while pending and the payment intent ({@code pi_...}) once
+     * paid - the latter being what a refund or a dispute is filed against.
+     */
+    @Column(name = "provider_reference", length = 255)
     private String providerReference;
 
     /**

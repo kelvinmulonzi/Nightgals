@@ -24,12 +24,34 @@ public record MonetizationProperties(
         /**
          * Which {@link com.nightgals.billing.PaymentProvider} is wired in.
          *
-         * <p>{@code auto} completes every purchase instantly and collects nothing -
-         * the happy path, for demonstrating the product without a human confirming
-         * each payment. {@code manual} leaves purchases PENDING for an
-         * administrator to settle once money actually arrives.
+         * <p><b>Superseded by {@link #providers}</b>, which takes several. Still
+         * read when that is unset, so existing deployments and the test suite keep
+         * working: a single value behaves as a one-element list.
          */
         String provider,
+
+        /**
+         * Every payment method on offer, comma-separated, in the order a picker
+         * should show them: {@code momo,stripe}.
+         *
+         * <p>More than one runs at a time and the buyer chooses per checkout, so
+         * this is a list rather than a switch. Known values are {@code momo},
+         * {@code stripe}, {@code manual} and {@code auto} - the last two being
+         * pre-launch scaffolding, and {@code auto} collecting no money at all.
+         *
+         * <p>Read by {@link com.nightgals.billing.PaymentProviderCondition} at bean
+         * registration time as well as here, so a method left out of this list has
+         * no beans at all rather than beans nobody can reach.
+         */
+        String providers,
+
+        /**
+         * Which method a checkout that names none should use.
+         *
+         * <p>Every client predating the picker sends no {@code method}, so this is
+         * what they get. Defaults to the first entry of {@link #providers}.
+         */
+        String defaultProvider,
 
         /** Shown when the provider is manual. */
         String manualPaymentInstructions,

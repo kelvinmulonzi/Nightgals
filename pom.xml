@@ -31,6 +31,7 @@
 		<jjwt.version>0.13.0</jjwt.version>
 		<springdoc.version>3.0.3</springdoc.version>
 		<awssdk.version>2.49.6</awssdk.version>
+		<stripe.version>33.2.0</stripe.version>
 	</properties>
 
 	<dependencyManagement>
@@ -87,6 +88,15 @@
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>${springdoc.version}</version>
+		</dependency>
+
+		<!-- Card payments. Only reached when a checkout names the STRIPE method;
+		     the beans in com.nightgals.billing.stripe are conditional on it being
+		     one of nightgals.monetization.providers. -->
+		<dependency>
+			<groupId>com.stripe</groupId>
+			<artifactId>stripe-java</artifactId>
+			<version>${stripe.version}</version>
 		</dependency>
 
 		<!-- JWT -->

@@ -1,13 +1,13 @@
 package com.nightgals.billing.momo;
 
 import com.nightgals.billing.BillingService;
+import com.nightgals.billing.ConditionalOnPaymentProvider;
 import com.nightgals.billing.Purchase;
 import com.nightgals.billing.PurchaseRepository;
 import com.nightgals.billing.PurchaseStatus;
 import com.nightgals.config.MomoProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -30,7 +30,7 @@ import java.time.Instant;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "nightgals.monetization.provider", havingValue = "momo")
+@ConditionalOnPaymentProvider("momo")
 public class MomoReconciler {
 
     private final PurchaseRepository purchases;

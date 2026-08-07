@@ -82,6 +82,12 @@ nightgals:
     currency: XAF
     # The suite drives settlement explicitly, so purchases must stay PENDING
     # until it says otherwise. AutoSettleTest overrides this for itself.
+    #
+    # Pinned here rather than left to fall through, because application.yml reads
+    # this from .env - so without it the suite would run on whichever payment
+    # methods the developer happens to have configured locally, and fail on a
+    # machine set up for real card payments.
+    providers: manual
     provider: manual
     # Off by default: most tests predate it and would otherwise pass every
     # paywall for free. TrialTest turns it on for itself.

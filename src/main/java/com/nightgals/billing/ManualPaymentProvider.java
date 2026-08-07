@@ -3,7 +3,6 @@ package com.nightgals.billing;
 import com.nightgals.common.Money;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,13 +13,14 @@ import org.springframework.stereotype.Component;
  * arrived - which is how a till-number or bank-transfer flow works anyway, so
  * this is usable in production, not only a placeholder.
  *
- * <p>Selected with {@code nightgals.monetization.provider=manual}. The default is
- * {@link AutoSettlePaymentProvider}, which needs no human at all - see there for
- * why that is only acceptable before launch.
+ * <p>Enabled by listing {@code manual} in {@code nightgals.monetization.providers}.
+ * The fallback when nothing is configured is {@link AutoSettlePaymentProvider},
+ * which needs no human at all - see there for why that is only acceptable before
+ * launch.
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "nightgals.monetization.provider", havingValue = "manual")
+@ConditionalOnPaymentProvider("manual")
 public class ManualPaymentProvider implements PaymentProvider {
 
     @Value("${nightgals.monetization.manual-payment-instructions:}")
@@ -29,6 +29,16 @@ public class ManualPaymentProvider implements PaymentProvider {
     @Override
     public String name() {
         return "MANUAL";
+    }
+
+    @Override
+    public String label() {
+        return "Bank transfer or till";
+    }
+
+    @Override
+    public String description() {
+        return "Pay out of band; access opens once our team confirms receipt.";
     }
 
     @Override

@@ -44,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("test")
 @Import(TestcontainersConfiguration.class)
 @TestPropertySource(properties = {
-        "nightgals.monetization.provider=auto",
+        "nightgals.monetization.providers=auto",
         "nightgals.creator-packages.enabled=true",
 })
 @Transactional

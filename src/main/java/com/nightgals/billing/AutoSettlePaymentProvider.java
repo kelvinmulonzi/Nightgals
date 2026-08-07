@@ -2,7 +2,6 @@ package com.nightgals.billing;
 
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -17,14 +16,16 @@ import java.util.UUID;
  * <p>It is a stand-in for a real provider, not a shortcut around one. Running it
  * in production would give away every paid thing on the platform for free, so it
  * announces itself loudly at startup and is switched by an explicit property.
- * Wiring in M-Pesa Daraja or a card gateway means adding a
- * {@link PaymentProvider} and pointing {@code nightgals.monetization.provider}
- * at it; nothing else in the codebase changes.
+ * Wiring in another gateway means adding a {@link PaymentProvider} and listing
+ * it in {@code nightgals.monetization.providers}; nothing else in the codebase
+ * changes.
+ *
+ * <p>Registers when nothing at all is configured, so an application with no
+ * monetisation settings still starts with something able to answer a checkout.
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "nightgals.monetization.provider", havingValue = "auto",
-        matchIfMissing = true)
+@ConditionalOnPaymentProvider(value = "auto", matchIfMissing = true)
 public class AutoSettlePaymentProvider implements PaymentProvider {
 
     @PostConstruct
@@ -42,6 +43,16 @@ public class AutoSettlePaymentProvider implements PaymentProvider {
     @Override
     public String name() {
         return "AUTO";
+    }
+
+    @Override
+    public String label() {
+        return "No payment (test mode)";
+    }
+
+    @Override
+    public String description() {
+        return "Completes instantly and collects nothing.";
     }
 
     @Override

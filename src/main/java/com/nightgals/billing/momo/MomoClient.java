@@ -1,8 +1,8 @@
 package com.nightgals.billing.momo;
 
+import com.nightgals.billing.ConditionalOnPaymentProvider;
 import com.nightgals.config.MomoProperties;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -35,7 +35,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "nightgals.monetization.provider", havingValue = "momo")
+@ConditionalOnPaymentProvider("momo")
 public class MomoClient {
 
     private final MomoProperties properties;

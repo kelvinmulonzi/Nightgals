@@ -8,14 +8,66 @@ package com.nightgals.billing;
  * band, and calls {@link BillingService#settle}. Nothing about access control
  * lives here.
  *
- * <p>The intended first real implementation is M-Pesa via the Daraja STK-push
- * API: {@code startPayment} triggers the push, the callback URL settles the
- * purchase.
+ * <p>Several are live at once and the buyer picks between them per checkout -
+ * MTN Mobile Money and cards through Stripe, in this market. {@link
+ * PaymentProviders} does the resolving; a provider itself never knows the others
+ * exist.
  */
 public interface PaymentProvider {
 
-    /** Stored on the purchase, and used to look it up when settlement arrives. */
+    /**
+     * Stored on the purchase, used to look it up when settlement arrives, and the
+     * code a client sends as {@code method} to choose this one. One identifier
+     * for all three, so a row in the database and a support conversation and an
+     * API call are all naming the same thing.
+     */
     String name();
+
+    /** What the payment picker shows. */
+    default String label() {
+        return name();
+    }
+
+    /** A line under the label, when one helps. Null for none. */
+    default String description() {
+        return null;
+    }
+
+    /**
+     * Other codes that select this provider.
+     *
+     * <p>Exists so a client may say {@code CARD} without having to know that the
+     * card processor is Stripe - which is the platform's business, not the app's,
+     * and could be swapped without a client release.
+     */
+    default java.util.Set<String> aliases() {
+        return java.util.Set.of();
+    }
+
+    /**
+     * Whether checkout has to collect a phone number for this provider.
+     *
+     * <p>Rendered by the picker to decide whether to show the field at all,
+     * rather than the client hard-coding which methods want one.
+     */
+    default boolean requiresPayerMsisdn() {
+        return false;
+    }
+
+    /**
+     * A public key this provider's client-side SDK needs, if it has one.
+     *
+     * <p>Stripe's publishable key is the case in point: public by design, but
+     * environment-specific, so serving it beside the method beats baking it into
+     * an app build that then needs re-releasing to move between test and live.
+     * Null for providers with nothing to publish.
+     *
+     * <p>Only ever a <i>public</i> credential. Nothing that can move money on its
+     * own goes near this.
+     */
+    default String clientKey() {
+        return null;
+    }
 
     /**
      * Begins payment for a purchase that has just been created as PENDING.

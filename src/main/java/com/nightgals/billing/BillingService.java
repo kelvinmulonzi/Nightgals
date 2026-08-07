@@ -60,21 +60,21 @@ public class BillingService {
     private final CreatorPackageService creatorPackageService;
     private final CreditService creditService;
     private final ReferralService referralService;
-    private final PaymentProvider paymentProvider;
+    private final PaymentProviders paymentProviders;
     private final EarningsService earningsService;
     private final EmailService emailService;
     private final MonetizationProperties properties;
 
     // ---------------------------------------------------------------- buying
 
-    /** A viewer buying one photo or video, paying by a means that needs no details. */
+    /** A viewer buying one photo or video, on the deployment's default method. */
     public CheckoutResponse unlockMedia(User buyer, UUID mediaId) {
-        return unlockMedia(buyer, mediaId, null);
+        return unlockMedia(buyer, mediaId, PaymentChoice.none());
     }
 
     /** A viewer buying one photo or video. */
     @Transactional
-    public CheckoutResponse unlockMedia(User buyer, UUID mediaId, String payerMsisdn) {
+    public CheckoutResponse unlockMedia(User buyer, UUID mediaId, PaymentChoice choice) {
         requireMonetisationOn();
 
         MediaAsset asset = mediaRepository.findById(mediaId)
@@ -93,6 +93,8 @@ public class BillingService {
             throw ApiException.conflict("already_unlocked", "You already have this");
         }
 
+        PaymentProvider provider = paymentProviders.resolve(choice.method());
+
         // Reuse a payment the buyer already started rather than opening a second.
         // The price is fixed when the purchase is created: a creator changing hers
         // mid-checkout must not change what somebody is being charged.
@@ -104,20 +106,20 @@ public class BillingService {
                         .amountMinor(pricing.priceOf(asset))
                         .currency(properties.currency())
                         .status(PurchaseStatus.PENDING)
-                        .provider(paymentProvider.name())
+                        .provider(provider.name())
                         .build()));
 
-        return checkout(buyer, purchase, payerMsisdn);
+        return checkout(buyer, purchase, provider, choice);
     }
 
-    /** A viewer buying entry to one broadcast, paying by a means that needs no details. */
+    /** A viewer buying entry to one broadcast, on the deployment's default method. */
     public CheckoutResponse buyLiveAccess(User buyer, UUID sessionId) {
-        return buyLiveAccess(buyer, sessionId, null);
+        return buyLiveAccess(buyer, sessionId, PaymentChoice.none());
     }
 
     /** A viewer buying entry to one broadcast. */
     @Transactional
-    public CheckoutResponse buyLiveAccess(User buyer, UUID sessionId, String payerMsisdn) {
+    public CheckoutResponse buyLiveAccess(User buyer, UUID sessionId, PaymentChoice choice) {
         requireMonetisationOn();
 
         LiveSession session = liveSessionRepository.findById(sessionId)
@@ -133,6 +135,8 @@ public class BillingService {
             throw ApiException.conflict("already_unlocked", "You already have access to this");
         }
 
+        PaymentProvider provider = paymentProviders.resolve(choice.method());
+
         Purchase purchase = purchaseRepository.findPendingForLive(buyer.getId(), sessionId)
                 .orElseGet(() -> purchaseRepository.save(Purchase.builder()
                         .user(buyer)
@@ -141,10 +145,10 @@ public class BillingService {
                         .amountMinor(pricing.priceOf(session))
                         .currency(properties.currency())
                         .status(PurchaseStatus.PENDING)
-                        .provider(paymentProvider.name())
+                        .provider(provider.name())
                         .build()));
 
-        return checkout(buyer, purchase, payerMsisdn);
+        return checkout(buyer, purchase, provider, choice);
     }
 
     /**
@@ -154,12 +158,14 @@ public class BillingService {
      * only takes the money for it.
      */
     public CheckoutResponse payForCall(User buyer, VideoCall call) {
-        return payForCall(buyer, call, null);
+        return payForCall(buyer, call, PaymentChoice.none());
     }
 
     @Transactional
-    public CheckoutResponse payForCall(User buyer, VideoCall call, String payerMsisdn) {
+    public CheckoutResponse payForCall(User buyer, VideoCall call, PaymentChoice choice) {
         requireMonetisationOn();
+
+        PaymentProvider provider = paymentProviders.resolve(choice.method());
 
         Purchase purchase = purchaseRepository.findPendingForCall(buyer.getId(), call.getId())
                 .orElseGet(() -> purchaseRepository.save(Purchase.builder()
@@ -169,10 +175,10 @@ public class BillingService {
                         .amountMinor(call.getPriceMinor())
                         .currency(call.getCurrency())
                         .status(PurchaseStatus.PENDING)
-                        .provider(paymentProvider.name())
+                        .provider(provider.name())
                         .build()));
 
-        return checkout(buyer, purchase, payerMsisdn);
+        return checkout(buyer, purchase, provider, choice);
     }
 
     /**
@@ -183,17 +189,18 @@ public class BillingService {
      * approved, rather than adding a second wait to the end of the first.
      */
     public CheckoutResponse buyCreatorPackage(User creator, String packageCode) {
-        return buyCreatorPackage(creator, packageCode, null);
+        return buyCreatorPackage(creator, packageCode, PaymentChoice.none());
     }
 
     @Transactional
-    public CheckoutResponse buyCreatorPackage(User creator, String packageCode, String payerMsisdn) {
+    public CheckoutResponse buyCreatorPackage(User creator, String packageCode, PaymentChoice choice) {
         CreatorPackageCode code = creatorPackageService.parseCode(packageCode);
         if (!creatorPackageService.packagesRequired()) {
             throw ApiException.conflict("packages_disabled",
                     "Posting is currently free - there is nothing to buy");
         }
         CreatorPackageProperties.Package config = creatorPackageService.configFor(code);
+        PaymentProvider provider = paymentProviders.resolve(choice.method());
 
         Purchase purchase = purchaseRepository.save(Purchase.builder()
                 .user(creator)
@@ -202,10 +209,10 @@ public class BillingService {
                 .amountMinor(config.priceMinor())
                 .currency(properties.currency())
                 .status(PurchaseStatus.PENDING)
-                .provider(paymentProvider.name())
+                .provider(provider.name())
                 .build());
 
-        return checkout(creator, purchase, payerMsisdn);
+        return checkout(creator, purchase, provider, choice);
     }
 
     /**
@@ -233,14 +240,30 @@ public class BillingService {
      * settles. That is the whole point of credit being spendable "toward
      * subscriptions or unlocking premium features".
      */
-    private CheckoutResponse checkout(User buyer, Purchase purchase, String payerMsisdn) {
+    private CheckoutResponse checkout(User buyer, Purchase purchase,
+                                      PaymentProvider provider, PaymentChoice choice) {
         // Set on every attempt, not only the first. A purchase left PENDING is
         // reused when the buyer tries again, and the second attempt may well be
         // from a different handset - the number recorded should be the one being
         // charged now, not the one that already failed.
-        String normalised = normaliseMsisdn(payerMsisdn);
+        String normalised = normaliseMsisdn(choice.payerMsisdn());
         if (normalised != null) {
             purchase.setPayerMsisdn(normalised);
+        }
+
+        // The same reuse applies to the method itself: somebody whose Mobile Money
+        // prompt went unanswered may come back and pay by card. Repointing the
+        // purchase matters beyond bookkeeping - the reconcilers sweep by provider,
+        // so a row left saying MOMO while Stripe holds the money would be chased by
+        // MTN, found unknown, and failed underneath a payment that succeeded. The
+        // old provider's reference goes with it, being meaningless to the new one.
+        if (!provider.name().equals(purchase.getProvider())) {
+            if (purchase.getProvider() != null) {
+                log.info("Purchase {} switched from {} to {}",
+                        purchase.getId(), purchase.getProvider(), provider.name());
+            }
+            purchase.setProvider(provider.name());
+            purchase.setProviderReference(null);
         }
 
         CreditService.Applied credit = creditService.applyTo(buyer, purchase);
@@ -255,7 +278,7 @@ public class BillingService {
                     null);
         }
 
-        var instruction = paymentProvider.startPayment(purchase);
+        var instruction = provider.startPayment(purchase);
         if (instruction.reference() != null) {
             purchase.setProviderReference(instruction.reference());
         }
@@ -263,7 +286,7 @@ public class BillingService {
         // A provider that settles on the spot has nothing to wait for, so access
         // is granted before the response is written rather than leaving the client
         // polling a purchase that is never going to change.
-        if (paymentProvider.settlesImmediately()) {
+        if (provider.settlesImmediately()) {
             grant(purchase, instruction.reference());
         }
 
@@ -461,10 +484,30 @@ public class BillingService {
 
     // ---------------------------------------------------------------- reads
 
+    /** What the checkout picker shows, in configured order. */
+    public java.util.List<com.nightgals.billing.dto.PaymentMethodResponse> paymentMethods() {
+        var fallback = paymentProviders.defaultProvider();
+        return paymentProviders.enabled().stream()
+                .map(provider -> com.nightgals.billing.dto.PaymentMethodResponse.of(
+                        provider, provider == fallback))
+                .toList();
+    }
+
     @Transactional(readOnly = true)
     public EntitlementResponse entitlements(User viewer) {
         long credit = creditService.balanceOf(viewer.getId());
-        String provider = paymentProvider.name();
+
+        // The default method, not the only one - several are live at once now and
+        // the buyer picks per checkout. Reported so a client that never renders a
+        // picker still knows what it is about to get, and asked of the provider
+        // itself rather than compared against "MOMO": which methods want a phone
+        // number is the provider's business, and hard-coding it here would go
+        // quietly wrong the moment a second mobile-money provider appears.
+        //
+        // GET /api/v1/billing/payment-methods is the fuller answer, and the one a
+        // checkout screen should be built on.
+        PaymentProvider fallback = paymentProviders.defaultProvider();
+
         return new EntitlementResponse(
                 viewer.isOnTrial(),
                 viewer.getTrialEndsAt(),
@@ -472,11 +515,8 @@ public class BillingService {
                 credit,
                 Money.plain(credit, properties.currency()),
                 properties.currency(),
-                provider,
-                // Asked from the provider's own name rather than from configuration,
-                // so swapping the bean cannot leave the client asking for a number
-                // nobody will charge - or worse, not asking for one that is required.
-                "MOMO".equals(provider));
+                fallback.name(),
+                fallback.requiresPayerMsisdn());
     }
 
     @Transactional(readOnly = true)

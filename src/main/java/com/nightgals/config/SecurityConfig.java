@@ -44,6 +44,15 @@ public class SecurityConfig {
             // as a rumour and re-reads the real status from MTN before settling
             // anything - see MomoCallbackController.
             "/api/v1/webhooks/momo",
+            // Stripe has no credential of ours either, but unlike MTN it signs
+            // every delivery: the handler verifies that signature against the
+            // endpoint's secret and rejects anything that fails. Permitting the
+            // path is not the same as trusting the body - see
+            // StripeWebhookController.
+            "/api/v1/webhooks/stripe",
+            // The payment picker, so a checkout screen can render its options
+            // before sign-in. Reads configuration, exposes no account data.
+            "/api/v1/billing/payment-methods",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",

@@ -6,6 +6,7 @@ import com.nightgals.billing.dto.CheckoutResponse;
 import com.nightgals.billing.dto.CreatorPackageResponse;
 import com.nightgals.billing.dto.CreatorPackageStatusResponse;
 import com.nightgals.billing.dto.EntitlementResponse;
+import com.nightgals.billing.dto.PaymentMethodResponse;
 import com.nightgals.billing.dto.PurchaseResponse;
 import com.nightgals.common.ErrorResponse;
 import com.nightgals.common.PageResponse;
@@ -50,9 +51,16 @@ import java.util.UUID;
         provider is involved, so a purchase covered entirely by credit settles without
         a payment at all.
 
-        **No payment provider is integrated yet.** Purchases are created `PENDING` and
-        the configured provider says how to pay. The default settles instantly and
-        collects nothing.
+        **Pick how to pay, per purchase.** `GET /payment-methods` lists what this
+        deployment accepts - MTN Mobile Money and card, typically - and every buy
+        endpoint takes that `code` as `method`. Omitting it uses the platform
+        default, so clients written before the picker keep working.
+
+        **Nothing settles in the response, except by credit.** A purchase is created
+        `PENDING` and the response says how to finish paying: `PROMPT_ON_PHONE` for
+        Mobile Money, `REDIRECT` to a Stripe-hosted page for card. Money arrives out
+        of band, so poll `GET /purchases` until the purchase reads `COMPLETED` or
+        `FAILED` rather than assuming the checkout call decided anything.
         """)
 @RestController
 @RequestMapping("/api/v1/billing")
@@ -61,6 +69,29 @@ public class BillingController {
 
     private final BillingService billingService;
     private final CreatorPackageService creatorPackageService;
+
+    // ------------------------------------------------------------ how to pay
+
+    @Operation(summary = "The payment methods on offer",
+            description = """
+                    What the checkout picker should show, in the order to show it.
+
+                    Send the `code` back as `method` on any of the buy endpoints below.
+                    `requiresPayerMsisdn` says whether picking that one also means
+                    collecting a phone number - read it rather than hard-coding which
+                    methods want one, because that moves when a provider is swapped.
+
+                    Exactly one entry has `isDefault: true`; that is what a checkout
+                    naming no `method` gets.
+
+                    Open, so the picker renders before sign-in.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "Enabled payment methods")
+    @GetMapping("/payment-methods")
+    public List<PaymentMethodResponse> paymentMethods() {
+        return billingService.paymentMethods();
+    }
 
     // ------------------------------------------------------------ viewers pay
 
@@ -80,30 +111,40 @@ public class BillingController {
                     created: a creator changing hers mid-checkout does not change what
                     you are charged.
 
-                    **Paying by Mobile Money.** Send `payerMsisdn` in the body. The
-                    response comes back with `action: PROMPT_ON_PHONE` and the purchase
-                    still `PENDING` - a prompt has gone to that handset and nobody has
-                    approved it yet. Poll `GET /api/v1/billing/purchases` until the
-                    purchase reaches `COMPLETED` or `FAILED`; every few seconds is
-                    enough, and an unanswered prompt is abandoned as `FAILED` rather
-                    than staying pending forever.
+                    **Choosing how to pay.** Send `method` from
+                    `GET /api/v1/billing/payment-methods`. Whichever you pick, the
+                    purchase comes back `PENDING` and money arrives out of band, so
+                    poll `GET /api/v1/billing/purchases` until it reads `COMPLETED` or
+                    `FAILED` - every few seconds is enough. Neither method leaves a
+                    purchase pending forever: an unanswered prompt and an abandoned
+                    card page are both eventually marked `FAILED`.
+
+                    `MOMO` - also send `payerMsisdn`. Comes back
+                    `action: PROMPT_ON_PHONE`; a prompt has gone to that handset and
+                    nobody has approved it yet.
+
+                    `STRIPE` (alias `CARD`) - comes back `action: REDIRECT` with a
+                    `redirectUrl`. Open it in a browser or web view; the payer enters
+                    their card on Stripe's own page and is returned to the app by deep
+                    link. Returning proves nothing - they may have pressed back - so
+                    the purchase is still what to believe.
                     """)
     @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
     @ApiResponse(responseCode = "400",
-            description = "It is free, it is your own, or `msisdn_required` - "
-                    + "mobile money needs a `payerMsisdn`",
+            description = "It is free, it is your own, `msisdn_required` - Mobile Money "
+                    + "needs a `payerMsisdn` - or `unknown_payment_method`",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "No such item",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "Already owned, or monetisation is off",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    @ApiResponse(responseCode = "503", description = "The mobile-money provider is not responding",
+    @ApiResponse(responseCode = "503", description = "`momo_unavailable` or `stripe_unavailable` - the chosen provider is not responding",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/media/{mediaId}")
     public CheckoutResponse unlockMedia(@AuthenticationPrincipal AuthUser principal,
                                         @PathVariable UUID mediaId,
                                         @Valid @RequestBody(required = false) CheckoutRequest request) {
-        return billingService.unlockMedia(principal.user(), mediaId, msisdnOf(request));
+        return billingService.unlockMedia(principal.user(), mediaId, choiceOf(request));
     }
 
     @Operation(
@@ -112,31 +153,43 @@ public class BillingController {
                     Each stream carries its own access price, set by its host. Buying one
                     grants the playback URL for that stream and nothing else.
 
-                    **Paying by Mobile Money.** Send `payerMsisdn` in the body. The
-                    response comes back with `action: PROMPT_ON_PHONE` and the purchase
-                    still `PENDING` - a prompt has gone to that handset and nobody has
-                    approved it yet. Poll `GET /api/v1/billing/purchases` until the
-                    purchase reaches `COMPLETED` or `FAILED`; every few seconds is
-                    enough, and an unanswered prompt is abandoned as `FAILED` rather
-                    than staying pending forever.
+                    **Choosing how to pay.** Send `method` from
+                    `GET /api/v1/billing/payment-methods`. Whichever you pick, the
+                    purchase comes back `PENDING` and money arrives out of band, so
+                    poll `GET /api/v1/billing/purchases` until it reads `COMPLETED` or
+                    `FAILED` - every few seconds is enough. Neither method leaves a
+                    purchase pending forever: an unanswered prompt and an abandoned
+                    card page are both eventually marked `FAILED`.
+
+                    `MOMO` - also send `payerMsisdn`. Comes back
+                    `action: PROMPT_ON_PHONE`; a prompt has gone to that handset and
+                    nobody has approved it yet.
+
+                    `STRIPE` (alias `CARD`) - comes back `action: REDIRECT` with a
+                    `redirectUrl`. Open it in a browser or web view; the payer enters
+                    their card on Stripe's own page and is returned to the app by deep
+                    link. Returning proves nothing - they may have pressed back - so
+                    the purchase is still what to believe.
                     """)
     @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
     @ApiResponse(responseCode = "400",
-            description = "It is open to everyone, it is your own, or `msisdn_required` - "
-                    + "mobile money needs a `payerMsisdn`",
+            description = "It is open to everyone, it is your own, `msisdn_required` - "
+                    + "Mobile Money needs a `payerMsisdn` - or `unknown_payment_method`",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    @ApiResponse(responseCode = "503", description = "The mobile-money provider is not responding",
+    @ApiResponse(responseCode = "503", description = "`momo_unavailable` or `stripe_unavailable` - the chosen provider is not responding",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/live/{sessionId}")
     public CheckoutResponse buyLiveAccess(@AuthenticationPrincipal AuthUser principal,
                                           @PathVariable UUID sessionId,
                                           @Valid @RequestBody(required = false) CheckoutRequest request) {
-        return billingService.buyLiveAccess(principal.user(), sessionId, msisdnOf(request));
+        return billingService.buyLiveAccess(principal.user(), sessionId, choiceOf(request));
     }
 
     /** The body is optional, so it may not be there at all. */
-    private static String msisdnOf(CheckoutRequest request) {
-        return request == null ? null : request.payerMsisdn();
+    private static PaymentChoice choiceOf(CheckoutRequest request) {
+        return request == null
+                ? PaymentChoice.none()
+                : PaymentChoice.of(request.method(), request.payerMsisdn());
     }
 
     // ------------------------------------------------------------ creators pay
@@ -190,28 +243,38 @@ public class BillingController {
                     If somebody referred this account, their bonus is credited when this -
                     their **first** package - settles.
 
-                    **Paying by Mobile Money.** Send `payerMsisdn` in the body. The
-                    response comes back with `action: PROMPT_ON_PHONE` and the purchase
-                    still `PENDING` - a prompt has gone to that handset and nobody has
-                    approved it yet. Poll `GET /api/v1/billing/purchases` until the
-                    purchase reaches `COMPLETED` or `FAILED`; every few seconds is
-                    enough, and an unanswered prompt is abandoned as `FAILED` rather
-                    than staying pending forever.
+                    **Choosing how to pay.** Send `method` from
+                    `GET /api/v1/billing/payment-methods`. Whichever you pick, the
+                    purchase comes back `PENDING` and money arrives out of band, so
+                    poll `GET /api/v1/billing/purchases` until it reads `COMPLETED` or
+                    `FAILED` - every few seconds is enough. Neither method leaves a
+                    purchase pending forever: an unanswered prompt and an abandoned
+                    card page are both eventually marked `FAILED`.
+
+                    `MOMO` - also send `payerMsisdn`. Comes back
+                    `action: PROMPT_ON_PHONE`; a prompt has gone to that handset and
+                    nobody has approved it yet.
+
+                    `STRIPE` (alias `CARD`) - comes back `action: REDIRECT` with a
+                    `redirectUrl`. Open it in a browser or web view; the payer enters
+                    their card on Stripe's own page and is returned to the app by deep
+                    link. Returning proves nothing - they may have pressed back - so
+                    the purchase is still what to believe.
                     """)
     @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
     @ApiResponse(responseCode = "400",
-            description = "Unknown package code, or `msisdn_required` - "
-                    + "mobile money needs a `payerMsisdn`",
+            description = "Unknown package code, `msisdn_required` - Mobile Money needs a "
+                    + "`payerMsisdn` - or `unknown_payment_method`",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "Creator packages are switched off here",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    @ApiResponse(responseCode = "503", description = "The mobile-money provider is not responding",
+    @ApiResponse(responseCode = "503", description = "`momo_unavailable` or `stripe_unavailable` - the chosen provider is not responding",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/creator-packages")
     public CheckoutResponse buyCreatorPackage(@AuthenticationPrincipal AuthUser principal,
                                               @Valid @RequestBody BuyPackageRequest request) {
         return billingService.buyCreatorPackage(principal.user(), request.packageCode(),
-                request.payerMsisdn());
+                PaymentChoice.of(request.method(), request.payerMsisdn()));
     }
 
     // ------------------------------------------------------------ reads

@@ -103,22 +103,27 @@ public class CallController {
                     Refused if she is already booked for any part of that window - overlap,
                     not just an identical start time.
 
-                    **Paying by Mobile Money.** Send `payerMsisdn` in the body. The response
-                    comes back with `action: PROMPT_ON_PHONE` and the purchase still
-                    `PENDING` - a prompt has gone to that handset and nobody has approved it
-                    yet. The slot is held meanwhile, so there is no race with another viewer.
-                    Poll `GET /api/v1/billing/purchases` until the purchase reaches
-                    `COMPLETED` or `FAILED`; a prompt nobody answers is abandoned as
-                    `FAILED` rather than holding the slot forever.
+                    **Choosing how to pay.** Send `method` from
+                    `GET /api/v1/billing/payment-methods` - `MOMO` (with `payerMsisdn`)
+                    returns `action: PROMPT_ON_PHONE`, `STRIPE` returns
+                    `action: REDIRECT` with a Stripe-hosted page to open. Omit it for the
+                    platform default.
+
+                    The slot is held throughout, so there is no race with another viewer
+                    while she waits to be paid. Poll `GET /api/v1/billing/purchases` until
+                    the purchase reaches `COMPLETED` or `FAILED`; a prompt nobody answers
+                    and a card page nobody completes are both abandoned as `FAILED` rather
+                    than holding the slot forever.
                     """)
     @ApiResponse(responseCode = "200", description = "Booked; follow the payment instructions")
     @ApiResponse(responseCode = "400",
-            description = "She does not offer that length, the time is out of bounds, or "
-                    + "`msisdn_required` - mobile money needs a `payerMsisdn`",
+            description = "She does not offer that length, the time is out of bounds, "
+                    + "`msisdn_required` - Mobile Money needs a `payerMsisdn` - or "
+                    + "`unknown_payment_method`",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "She is already booked then",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    @ApiResponse(responseCode = "503", description = "The mobile-money provider is not responding",
+    @ApiResponse(responseCode = "503", description = "`momo_unavailable` or `stripe_unavailable` - the chosen provider is not responding",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @PostMapping("/members/{userId}/calls")
     public CheckoutResponse book(@AuthenticationPrincipal AuthUser principal,

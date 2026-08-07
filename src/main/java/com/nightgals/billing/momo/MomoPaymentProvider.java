@@ -1,17 +1,18 @@
 package com.nightgals.billing.momo;
 
+import com.nightgals.billing.ConditionalOnPaymentProvider;
 import com.nightgals.billing.PaymentProvider;
 import com.nightgals.billing.Purchase;
 import com.nightgals.common.ApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
  * MTN Mobile Money collections.
  *
- * <p>Selected with {@code nightgals.monetization.provider=momo}.
+ * <p>Enabled by listing {@code momo} in {@code nightgals.monetization.providers},
+ * and chosen per checkout by a client sending {@code method: MOMO}.
  *
  * <p>Nothing settles here. {@code requesttopay} only pushes a prompt to the
  * payer's handset; whether they approve it is a later, separate event that
@@ -26,7 +27,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "nightgals.monetization.provider", havingValue = "momo")
+@ConditionalOnPaymentProvider("momo")
 public class MomoPaymentProvider implements PaymentProvider {
 
     private final MomoClient client;
@@ -35,6 +36,22 @@ public class MomoPaymentProvider implements PaymentProvider {
     @Override
     public String name() {
         return "MOMO";
+    }
+
+    @Override
+    public String label() {
+        return "MTN Mobile Money";
+    }
+
+    @Override
+    public String description() {
+        return "A prompt is sent to your phone to approve.";
+    }
+
+    /** The whole point of the method: there is a handset to push a prompt to. */
+    @Override
+    public boolean requiresPayerMsisdn() {
+        return true;
     }
 
     @Override
