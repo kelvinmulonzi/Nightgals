@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 /**
@@ -62,6 +63,7 @@ public class BillingService {
     private final ReferralService referralService;
     private final PaymentProviders paymentProviders;
     private final EarningsService earningsService;
+    private final com.nightgals.live.LiveQuotaService liveQuotaService;
     private final EmailService emailService;
     private final MonetizationProperties properties;
 
@@ -207,6 +209,58 @@ public class BillingService {
                 .type(PurchaseType.CREATOR_PACKAGE)
                 .packageCode(code)
                 .amountMinor(config.priceMinor())
+                .currency(properties.currency())
+                .status(PurchaseStatus.PENDING)
+                .provider(provider.name())
+                .build());
+
+        return checkout(creator, purchase, provider, choice);
+    }
+
+    /**
+     * Buying extra live minutes for today.
+     *
+     * <p>Exists because running out mid-broadcast otherwise means being cut off
+     * with an audience watching. The minutes are added to today only and expire
+     * with it - a creator who needs more every day wants a bigger package, and
+     * selling her the same top-up daily instead would be worse value dressed up
+     * as flexibility.
+     *
+     * <p>Granted on settlement rather than here: minutes nobody paid for must not
+     * extend anything, and on mobile money the answer arrives minutes later.
+     */
+    @Transactional
+    public CheckoutResponse buyLiveExtension(User creator, int minutes, PaymentChoice choice) {
+        requireMonetisationOn();
+
+        MonetizationProperties.LiveExtension rules = properties.liveExtension();
+        if (rules == null || rules.pricePerMinuteMinor() <= 0) {
+            throw ApiException.conflict("extensions_disabled",
+                    "Buying extra live minutes is not available here.");
+        }
+        if (minutes <= 0 || minutes > rules.maxMinutesPerDay()) {
+            throw ApiException.badRequest("bad_extension",
+                    "You can buy between 1 and " + rules.maxMinutesPerDay() + " extra minutes a day.");
+        }
+
+        // A package is what the top-up tops up. Without one there is no allowance
+        // to extend, and selling minutes to someone who cannot broadcast at all
+        // would take money for nothing.
+        if (creatorPackageService.dailyLiveMinutesFor(creator) <= 0) {
+            throw new ApiException(org.springframework.http.HttpStatus.PAYMENT_REQUIRED,
+                    "package_required",
+                    "Going live needs a package. Choose one, then top up if you need longer.");
+        }
+
+        LocalDate day = LocalDate.now(java.time.ZoneOffset.UTC);
+        PaymentProvider provider = paymentProviders.resolve(choice.method());
+
+        Purchase purchase = purchaseRepository.save(Purchase.builder()
+                .user(creator)
+                .type(PurchaseType.LIVE_EXTENSION)
+                .extensionMinutes(minutes)
+                .extensionDate(day)
+                .amountMinor(rules.pricePerMinuteMinor() * minutes)
                 .currency(properties.currency())
                 .status(PurchaseStatus.PENDING)
                 .provider(provider.name())
@@ -368,6 +422,10 @@ public class BillingService {
                 grantCreatorPackage(purchase);
                 referralService.onPurchaseSettled(purchase);
             }
+            case LIVE_EXTENSION -> liveQuotaService.grantMinutes(
+                    purchase.getUser(),
+                    purchase.getExtensionDate(),
+                    purchase.getExtensionMinutes());
             case PROFILE_UNLOCK, SUBSCRIPTION -> log.warn(
                     "Purchase {} is a retired type ({}); nothing granted",
                     purchase.getId(), purchase.getType());

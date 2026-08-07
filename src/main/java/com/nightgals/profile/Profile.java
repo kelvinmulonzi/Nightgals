@@ -64,6 +64,15 @@ public class Profile extends BaseEntity {
     @Builder.Default
     private boolean discoverable = true;
 
+    /**
+     * A number this member is choosing to publish, for WhatsApp.
+     *
+     * <p>Not the same as the handset that pays - that lives on the purchase, and
+     * conflating the two would publish a payment detail.
+     */
+    @Column(length = 20)
+    private String whatsappNumber;
+
     public int getAge() {
         return Period.between(dateOfBirth, LocalDate.now()).getYears();
     }

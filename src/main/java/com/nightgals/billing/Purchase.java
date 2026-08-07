@@ -112,6 +112,22 @@ public class Purchase extends BaseEntity {
     @Column(name = "payer_msisdn", length = 20)
     private String payerMsisdn;
 
+    /**
+     * How many extra live minutes this bought, for LIVE_EXTENSION. Null otherwise.
+     */
+    @Column(name = "extension_minutes")
+    private Integer extensionMinutes;
+
+    /**
+     * The day those minutes are for.
+     *
+     * <p>Stored rather than derived from the settlement time: a purchase started
+     * at 23:59 and approved at 00:01 belongs to the broadcast it was bought for,
+     * not to the following day.
+     */
+    @Column(name = "extension_date")
+    private java.time.LocalDate extensionDate;
+
     @Column(name = "failure_reason", length = 200)
     private String failureReason;
 

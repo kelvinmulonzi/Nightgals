@@ -175,6 +175,16 @@ nightgals:
 #    P7D
     free-trial: ${FREE_TRIAL:PT0S}
 
+    # Buying past the daily live allowance, so running out mid-broadcast does not
+    # mean being cut off with an audience watching. The minutes are for that day
+    # only and expire with it - this tops up a package, it does not replace one.
+    live-extension:
+      # Zero switches extensions off. Priced per minute so the client can offer
+      # whatever lengths suit without the server agreeing to them in advance.
+      price-per-minute-minor: ${LIVE_EXTENSION_PRICE_PER_MINUTE:200}
+      # The ceiling that stops a daily top-up from being cheaper than upgrading.
+      max-minutes-per-day: ${LIVE_EXTENSION_MAX_MINUTES:120}
+
     referral:
       # Paid to the referrer when the referred account buys its FIRST package.
       bonus-minor: 5000

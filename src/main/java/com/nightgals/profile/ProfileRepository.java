@@ -28,6 +28,13 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
      * a join would duplicate her card.
      *
      * <p>{@code city} must already be lower-cased by the caller.
+     *
+     * <p>Age is filtered as a date range rather than by computing each row's age:
+     * {@code minAge} becomes "born on or before today minus that many years", and
+     * {@code maxAge} is exclusive at the far end so that asking for 25-30 includes
+     * everyone up to the day before their 31st birthday. Comparing the stored date
+     * against a bound also lets an index on date_of_birth do the work, which
+     * {@code date_part(... age(...))} would not.
      */
     @Query(value = """
             SELECT p.* FROM profiles p
@@ -37,6 +44,10 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND p.discoverable = TRUE
               AND u.id <> :viewerId
               AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
+              AND (CAST(:minAge AS INT) IS NULL
+                   OR p.date_of_birth <= CURRENT_DATE - MAKE_INTERVAL(years => CAST(:minAge AS INT)))
+              AND (CAST(:maxAge AS INT) IS NULL
+                   OR p.date_of_birth > CURRENT_DATE - MAKE_INTERVAL(years => CAST(:maxAge AS INT) + 1))
             ORDER BY COALESCE((
                 SELECT MAX(CASE cp.package_code
                                WHEN 'BLACK_DIAMOND' THEN 3
@@ -58,9 +69,15 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND p.discoverable = TRUE
               AND u.id <> :viewerId
               AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
+              AND (CAST(:minAge AS INT) IS NULL
+                   OR p.date_of_birth <= CURRENT_DATE - MAKE_INTERVAL(years => CAST(:minAge AS INT)))
+              AND (CAST(:maxAge AS INT) IS NULL
+                   OR p.date_of_birth > CURRENT_DATE - MAKE_INTERVAL(years => CAST(:maxAge AS INT) + 1))
             """,
             nativeQuery = true)
     Page<Profile> findFeed(@Param("viewerId") UUID viewerId,
                            @Param("city") String city,
+                           @Param("minAge") Integer minAge,
+                           @Param("maxAge") Integer maxAge,
                            Pageable pageable);
 }

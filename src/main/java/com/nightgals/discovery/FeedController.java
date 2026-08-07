@@ -11,7 +11,10 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -34,6 +37,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/members")
 @RequiredArgsConstructor
+// Required for the @Min/@Max on the query parameters below to be enforced at
+// all - without it Spring binds them and the constraints are silently ignored.
+@Validated
 public class FeedController {
 
     private final FeedService feedService;
@@ -53,7 +59,11 @@ public class FeedController {
     public PageResponse<MemberCardResponse> browse(
             @AuthenticationPrincipal AuthUser principal,
             @Parameter(description = "Filter to one city, e.g. Nairobi") @RequestParam(required = false) String city,
+            @Parameter(description = "Youngest age to include, inclusive", example = "21")
+            @RequestParam(required = false) @Min(18) @Max(120) Integer minAge,
+            @Parameter(description = "Oldest age to include, inclusive", example = "35")
+            @RequestParam(required = false) @Min(18) @Max(120) Integer maxAge,
             @PageableDefault(size = 20) Pageable pageable) {
-        return feedService.feed(AuthUser.userOrNull(principal), city, pageable);
+        return feedService.feed(AuthUser.userOrNull(principal), city, minAge, maxAge, pageable);
     }
 }

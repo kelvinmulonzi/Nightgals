@@ -37,19 +37,55 @@ public class LiveQuotaService {
     /** What a creator has left today, in minutes. */
     @Transactional(readOnly = true)
     public Remaining remainingToday(User creator) {
-        int allowance = packageService.dailyLiveMinutesFor(creator);
-        if (allowance <= 0) {
-            return new Remaining(0, 0, 0);
+        int included = packageService.dailyLiveMinutesFor(creator);
+        int bought = boughtToday(creator.getId());
+        if (included <= 0 && bought <= 0) {
+            return new Remaining(0, 0, 0, 0);
         }
+        int allowance = included + bought;
         int used = usedToday(creator.getId()) + minutesOnAir(creator.getId());
-        return new Remaining(allowance, used, Math.max(0, allowance - used));
+        return new Remaining(allowance, bought, used, Math.max(0, allowance - used));
     }
 
-    public record Remaining(int allowanceMinutes, int usedMinutes, int remainingMinutes) {
+    /**
+     * @param allowanceMinutes what she may broadcast today in total, package plus bought
+     * @param boughtMinutes    the paid part of that, so the UI can say what an
+     *                         extension actually got her
+     */
+    public record Remaining(int allowanceMinutes, int boughtMinutes,
+                            int usedMinutes, int remainingMinutes) {
 
         public boolean exhausted() {
             return remainingMinutes <= 0;
         }
+    }
+
+    /**
+     * Adds bought minutes to today's allowance.
+     *
+     * <p>Called from settlement, not from checkout - minutes that were never paid
+     * for must not extend anything. Written against the day the extension was
+     * bought for rather than the day the money landed, so a payment that settles
+     * after midnight still tops up the broadcast it was bought for.
+     */
+    @Transactional
+    public void grantMinutes(User creator, LocalDate day, int minutes) {
+        if (minutes <= 0) {
+            return;
+        }
+        LiveUsageDaily usage = usageRepository.findByCreatorIdAndUsageDate(creator.getId(), day)
+                .orElseGet(() -> LiveUsageDaily.builder()
+                        .creator(creator)
+                        .usageDate(day)
+                        .minutesUsed(0)
+                        .bonusMinutes(0)
+                        .build());
+
+        usage.setBonusMinutes(usage.getBonusMinutes() + minutes);
+        usageRepository.save(usage);
+
+        log.info("Creator {} bought {} extra live minutes for {} ({} bought in total)",
+                creator.getId(), minutes, day, usage.getBonusMinutes());
     }
 
     /**
@@ -130,6 +166,12 @@ public class LiveQuotaService {
     private int usedToday(UUID creatorId) {
         return usageRepository.findByCreatorIdAndUsageDate(creatorId, today())
                 .map(LiveUsageDaily::getMinutesUsed)
+                .orElse(0);
+    }
+
+    private int boughtToday(UUID creatorId) {
+        return usageRepository.findByCreatorIdAndUsageDate(creatorId, today())
+                .map(LiveUsageDaily::getBonusMinutes)
                 .orElse(0);
     }
 

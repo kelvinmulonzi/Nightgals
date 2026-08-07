@@ -217,6 +217,28 @@ public class EmailService {
                 creatorName + " goes live at " + when + ".");
     }
 
+    /**
+     * Sent the moment identity documents reach the review queue.
+     *
+     * <p>Review is not instant and the screen that says so is one the user
+     * navigates away from. Without this, handing over a passport is followed by
+     * silence, which reads as the upload having failed - and the usual response
+     * to that is to submit again.
+     */
+    @Async
+    public void sendVerificationReceived(String to, String username) {
+        String body = EmailTemplates.heading("Your documents are with us")
+                + EmailTemplates.paragraph("Hi " + username
+                        + ", we have your identity documents and a reviewer is checking them.")
+                + EmailTemplates.paragraph("Most checks are done within a day. We will email you"
+                        + " as soon as there is a decision - there is nothing else for you to do,"
+                        + " and no need to send them again.")
+                + EmailTemplates.button("Check the status", properties.appBaseUrl() + "/onboarding/status");
+
+        sendQuietly(to, "We are reviewing your documents", body,
+                "Your identity documents are under review.");
+    }
+
     /** Sent when an administrator decides on an identity submission. */
     @Async
     public void sendVerificationDecision(String to, String username, boolean approved, String reason) {

@@ -15,6 +15,20 @@ import java.util.UUID;
 public record MemberCardResponse(
         UUID userId,
         @Schema(example = "VelvetFalcon482") String username,
+
+        @Schema(description = """
+                The name shown under the picture. Null when the member has not set one,
+                in which case the card falls back to the username.
+                """, example = "Amina")
+        String displayName,
+
+        @Schema(description = """
+                True when this member has passed the identity check. Always true on the
+                feed as it stands - only approved profiles are listed - but carried so
+                the badge renders off the fact rather than off that assumption.
+                """)
+        boolean verified,
+
         int age,
         Gender gender,
         String city,
@@ -64,6 +78,9 @@ public record MemberCardResponse(
         return new MemberCardResponse(
                 profile.getUser().getId(),
                 profile.getUser().getUsername(),
+                profile.getDisplayName(),
+                profile.getUser().getVerificationStatus()
+                        == com.nightgals.user.VerificationStatus.APPROVED,
                 profile.getAge(),
                 profile.getGender(),
                 profile.getCity(),

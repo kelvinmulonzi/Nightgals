@@ -35,6 +35,7 @@ public class KycReviewService {
     private final ProfileRepository profileRepository;
     private final UserRepository userRepository;
     private final StorageService storageService;
+    private final com.nightgals.mail.EmailService emailService;
 
     @Transactional(readOnly = true)
     public PageResponse<KycReviewItemResponse> queue(Pageable pageable) {
@@ -118,6 +119,16 @@ public class KycReviewService {
         applicant.setVerificationStatus(approve ? VerificationStatus.APPROVED : VerificationStatus.REJECTED);
 
         log.info("KYC submission {} {} by {}", submissionId, approve ? "APPROVED" : "REJECTED", reviewer.getEmail());
+
+        // Nobody sits watching the review screen, so the verdict has to go to
+        // them. Async and self-swallowing: a mail outage must not roll back a
+        // decision a moderator has already made.
+        emailService.sendVerificationDecision(
+                applicant.getEmail(),
+                applicant.getUsername(),
+                approve,
+                request.rejectionReason() == null ? null : request.rejectionReason().message());
+
         return toReviewItem(submission);
     }
 

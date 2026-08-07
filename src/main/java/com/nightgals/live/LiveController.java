@@ -2,6 +2,11 @@ package com.nightgals.live;
 
 import com.nightgals.common.ErrorResponse;
 import com.nightgals.common.PageResponse;
+import com.nightgals.billing.BillingService;
+import com.nightgals.billing.dto.CheckoutResponse;
+import com.nightgals.config.MonetizationProperties;
+import com.nightgals.live.dto.ExtendLiveRequest;
+import com.nightgals.live.dto.LiveAllowanceResponse;
 import com.nightgals.live.dto.LiveSessionRequest;
 import com.nightgals.live.dto.LiveSessionResponse;
 import com.nightgals.user.AuthUser;
@@ -54,6 +59,9 @@ import java.util.UUID;
 public class LiveController {
 
     private final LiveSessionService liveSessionService;
+    private final LiveQuotaService liveQuotaService;
+    private final BillingService billingService;
+    private final MonetizationProperties monetization;
 
     @Operation(summary = "Announce or start a broadcast",
             description = "Omit `scheduledFor` to go live immediately. **Requires: APPROVED.**")
@@ -73,6 +81,48 @@ public class LiveController {
     @GetMapping("/me/live")
     public List<LiveSessionResponse> mine(@AuthenticationPrincipal AuthUser principal) {
         return liveSessionService.mine(principal.id());
+    }
+
+    @Operation(summary = "How many live minutes I have left today",
+            description = """
+                    The daily allowance, what has been used, and what any top-up added.
+
+                    `remainingMinutes` counts a broadcast that is on air right now, so it
+                    falls while streaming - which is what makes it usable for a "you have
+                    5 minutes left" warning rather than a figure that only moves once the
+                    stream ends.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Today's allowance")
+    @GetMapping("/me/live/allowance")
+    public LiveAllowanceResponse allowance(@AuthenticationPrincipal AuthUser principal) {
+        return LiveAllowanceResponse.of(
+                liveQuotaService.remainingToday(principal.user()),
+                monetization.liveExtension(),
+                monetization.currency());
+    }
+
+    @Operation(summary = "Buy extra live minutes for today",
+            description = """
+                    Tops up today's allowance so a broadcast that is running long does not
+                    get cut off. The minutes are for today only and expire with it.
+
+                    Like every other purchase this returns a CheckoutResponse: on mobile
+                    money it comes back `PROMPT_ON_PHONE` and `PENDING`, and **the minutes
+                    are not granted until it settles**. Poll the purchase rather than
+                    assuming the extension is live.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
+    @ApiResponse(responseCode = "402", description = "No package, so there is no allowance to extend",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "400", description = "Outside the daily bounds",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/me/live/extend")
+    public CheckoutResponse extend(@AuthenticationPrincipal AuthUser principal,
+                                   @Valid @RequestBody ExtendLiveRequest request) {
+        return billingService.buyLiveExtension(
+                principal.user(),
+                request.minutes(),
+                com.nightgals.billing.PaymentChoice.of(request.method(), request.payerMsisdn()));
     }
 
     @Operation(summary = "Go live with a scheduled session")

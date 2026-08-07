@@ -42,6 +42,18 @@ public class LiveUsageDaily extends BaseEntity {
     @Column(name = "usage_date", nullable = false)
     private LocalDate usageDate;
 
+    /**
+     * Minutes bought for this day, on top of what the package includes.
+     *
+     * <p>Kept apart from {@code minutesUsed} because they answer different
+     * questions - one is consumption, the other entitlement. Folding paid
+     * minutes into the used count would make a creator look busier the more she
+     * spent.
+     */
+    @Column(name = "bonus_minutes", nullable = false)
+    @Builder.Default
+    private int bonusMinutes = 0;
+
     @Column(name = "minutes_used", nullable = false)
     @Builder.Default
     private int minutesUsed = 0;

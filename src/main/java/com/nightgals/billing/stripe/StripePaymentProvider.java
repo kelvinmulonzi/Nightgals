@@ -132,6 +132,7 @@ public class StripePaymentProvider implements PaymentProvider {
                     ? "Nightgals creator package"
                     : "Nightgals " + purchase.getPackageCode().name().replace('_', ' ').toLowerCase()
                       + " package";
+            case LIVE_EXTENSION -> purchase.getExtensionMinutes() + " extra live minutes";
             case PROFILE_UNLOCK, SUBSCRIPTION -> "Nightgals access";
         };
     }

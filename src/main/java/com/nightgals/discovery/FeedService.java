@@ -59,13 +59,24 @@ public class FeedService {
      *               people can see who is here before signing up
      */
     @Transactional(readOnly = true)
-    public PageResponse<MemberCardResponse> feed(User viewer, String city, Pageable pageable) {
+    public PageResponse<MemberCardResponse> feed(User viewer, String city,
+                                                 Integer minAge, Integer maxAge, Pageable pageable) {
+        // Swapped rather than rejected: someone dragging a range slider past
+        // itself means the range, not an error page.
+        if (minAge != null && maxAge != null && minAge > maxAge) {
+            Integer swap = minAge;
+            minAge = maxAge;
+            maxAge = swap;
+        }
+
         Page<Profile> page = profileRepository.findFeed(
                 // A sentinel rather than null: the query only uses this to exclude
                 // the caller's own card, and a null bind parameter here would hit
                 // the same Postgres type-inference problem as the city filter.
                 viewer == null ? ANONYMOUS : viewer.getId(),
                 city == null || city.isBlank() ? null : city.trim().toLowerCase(java.util.Locale.ROOT),
+                minAge,
+                maxAge,
                 pageable);
 
         List<UUID> userIds = page.getContent().stream().map(p -> p.getUser().getId()).toList();

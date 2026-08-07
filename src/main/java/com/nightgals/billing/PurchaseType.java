@@ -21,6 +21,15 @@ public enum PurchaseType {
     CREATOR_PACKAGE,
 
     /**
+     * A creator buying extra live minutes for one day.
+     *
+     * <p>Money towards the platform, like a package - it tops up the daily
+     * allowance a package sells, so it produces no earnings entry. It expires
+     * with the day it was bought for: this is not an upgrade.
+     */
+    LIVE_EXTENSION,
+
+    /**
      * Retired: one payment opened everything a creator had posted. Kept because
      * historical rows still carry it and their receipts still have to render.
      * Nothing creates new ones.

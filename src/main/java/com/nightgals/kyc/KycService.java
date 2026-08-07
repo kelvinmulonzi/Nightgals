@@ -45,6 +45,7 @@ public class KycService {
     private final StorageService storageService;
     private final UploadValidator uploadValidator;
     private final AppProperties appProperties;
+    private final com.nightgals.mail.EmailService emailService;
 
     /**
      * Opens a verification attempt, or updates the details of the one already in
@@ -153,6 +154,10 @@ public class KycService {
         managed.setVerificationStatus(VerificationStatus.PENDING_REVIEW);
 
         log.info("KYC submission {} queued for review", submission.getId());
+
+        // Confirm receipt, so handing over a passport is not followed by silence.
+        emailService.sendVerificationReceived(managed.getEmail(), managed.getUsername());
+
         return KycSubmissionResponse.of(submission);
     }
 

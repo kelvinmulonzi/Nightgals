@@ -20,8 +20,8 @@ public record ProfileResponse(
         String username,
 
         @Schema(description = """
-                Private nickname. Returned only to the owner and to staff - it is
-                null on any view of another member.
+                The name shown under the profile picture. Public - returned on every
+                view, including anonymous ones.
                 """)
         String displayName,
 
@@ -40,6 +40,13 @@ public record ProfileResponse(
         @Schema(description = "Whether this member has passed ID verification")
         VerificationStatus verificationStatus,
 
+        @Schema(description = "True when verificationStatus is APPROVED. The badge renders off this.")
+        boolean verified,
+
+        @Schema(description = "Optional public contact number, for a WhatsApp link. Null when not shared.",
+                example = "237689686224")
+        String whatsappNumber,
+
         Instant createdAt,
         Instant updatedAt) {
 
@@ -51,14 +58,18 @@ public record ProfileResponse(
     /**
      * What another member sees.
      *
-     * <p>Deliberately withholds both the private nickname and the exact date of
-     * birth. A verified account is not a publicly identified one: the platform
-     * knows who someone is, the rest of the app knows them by their handle.
+     * <p>Still withholds the exact date of birth - the age is enough to browse on,
+     * and a full birth date is an identifier. A verified account is not a publicly
+     * identified one: the platform knows who someone is, the rest of the app knows
+     * them by their handle.
+     *
+     * <p>The display name <em>is</em> published, as of V17. It used to be withheld
+     * here; it is now the name shown under the profile picture.
      *
      * <p>Prices live on the items themselves now, so there is none to withhold.
      */
     public static ProfileResponse publicView(Profile profile) {
-        return build(profile, null, null);
+        return build(profile, profile.getDisplayName(), null);
     }
 
     private static ProfileResponse build(Profile profile, String displayName, LocalDate dateOfBirth) {
@@ -76,6 +87,8 @@ public record ProfileResponse(
                 profile.getVibe(),
                 profile.isDiscoverable(),
                 profile.getUser().getVerificationStatus(),
+                profile.getUser().getVerificationStatus() == VerificationStatus.APPROVED,
+                profile.getWhatsappNumber(),
                 profile.getCreatedAt(),
                 profile.getUpdatedAt());
     }

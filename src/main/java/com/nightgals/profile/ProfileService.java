@@ -69,6 +69,11 @@ public class ProfileService {
         if (request.discoverable() != null) {
             profile.setDiscoverable(request.discoverable());
         }
+        // Blank clears it, so a member who changes their mind about publishing a
+        // number can take it down by emptying the field rather than having to
+        // find a separate control for it.
+        profile.setWhatsappNumber(request.whatsappNumber() == null || request.whatsappNumber().isBlank()
+                ? null : request.whatsappNumber().trim());
         return ProfileResponse.of(profileRepository.save(profile));
     }
 

@@ -67,7 +67,24 @@ public record MonetizationProperties(
          */
         Duration freeTrial,
 
-        Referral referral) {
+        Referral referral,
+
+        /** What extra live minutes cost, when a broadcast needs to run longer. */
+        LiveExtension liveExtension) {
+
+    /**
+     * Buying past the daily live allowance.
+     *
+     * <p>Priced per minute rather than in fixed blocks so the client can offer
+     * whatever lengths make sense without the server having to agree in advance.
+     * The daily cap is what stops a top-up from quietly replacing a package.
+     */
+    public record LiveExtension(
+            /** Zero or absent switches extensions off entirely. */
+            long pricePerMinuteMinor,
+            /** The most that can be bought in one day, across all top-ups. */
+            int maxMinutesPerDay) {
+    }
 
     /**
      * What a viewer pays for one video or one broadcast.
