@@ -35,4 +35,7 @@ build/
 # Nightgals
 var/storage/
 # Real credentials. .env.example is the committed template; this never is.
-
+#
+# This comment existed without the rule under it, so .env was tracked and
+# committed anyway - which is how a Gmail app password, JWT_SECRET,
+# DOCUMENT_HASH_PEPPER and the MTN credentials ended up in the history.

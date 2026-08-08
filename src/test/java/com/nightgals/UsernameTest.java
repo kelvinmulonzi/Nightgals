@@ -59,7 +59,7 @@ class UsernameTest {
     }
 
     @Test
-    @DisplayName("Another member's profile exposes the handle, never the private nickname or date of birth")
+    @DisplayName("Another member's profile exposes the handle and display name, never the date of birth")
     void publicProfileHidesIdentifyingDetail() {
         User owner = register();
         profileService.createOrUpdate(owner, new ProfileRequest(
@@ -80,7 +80,10 @@ class UsernameTest {
 
         var publicView = profileService.getPublic(owner.getId(), viewer);
         assertThat(publicView.username()).isEqualTo(reload(owner).getUsername());
-        assertThat(publicView.displayName()).isNull();
+        // Published as of V17: the display name is the name shown under the
+        // profile picture. It used to be withheld here, and this assertion is
+        // what caught the change - deliberate, not a regression.
+        assertThat(publicView.displayName()).isEqualTo("Amina");
         assertThat(publicView.dateOfBirth()).isNull();
         // Age is coarse enough to share; the exact birth date is not.
         assertThat(publicView.age()).isEqualTo(ownView.age());
