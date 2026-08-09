@@ -73,6 +73,24 @@ public class Profile extends BaseEntity {
     @Column(length = 20)
     private String whatsappNumber;
 
+    /**
+     * The profile picture.
+     *
+     * <p>Its own field rather than a flag on a gallery item: an avatar is part of
+     * the profile, not something published and priced. Keeping it here means
+     * setting one does not also post a photo, and changing it does not disturb
+     * the gallery.
+     */
+    @Column(name = "avatar_storage_key", length = 500)
+    private String avatarStorageKey;
+
+    @Column(name = "avatar_content_type", length = 100)
+    private String avatarContentType;
+
+    public boolean hasAvatar() {
+        return avatarStorageKey != null && !avatarStorageKey.isBlank();
+    }
+
     public int getAge() {
         return Period.between(dateOfBirth, LocalDate.now()).getYears();
     }

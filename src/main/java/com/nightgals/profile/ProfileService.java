@@ -10,8 +10,10 @@ import com.nightgals.user.UserRepository;
 import com.nightgals.user.VerificationStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.nightgals.storage.StoredFile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.Period;
@@ -25,10 +27,13 @@ public class ProfileService {
     private final ProfileRepository profileRepository;
     private final UserRepository userRepository;
     private final AppProperties appProperties;
+    private final com.nightgals.media.MediaRepository mediaRepository;
+    private final com.nightgals.storage.StorageService storageService;
+    private final com.nightgals.storage.UploadValidator uploadValidator;
 
     @Transactional(readOnly = true)
     public ProfileResponse getOwn(UUID userId) {
-        return ProfileResponse.of(requireProfile(userId));
+        return ProfileResponse.of(requireProfile(userId), profilePhotoUrl(userId));
     }
 
     /**
@@ -90,14 +95,90 @@ public class ProfileService {
     public ProfileResponse getPublic(UUID targetUserId, User viewer) {
         Profile profile = requireProfile(targetUserId);
         boolean self = viewer != null && profile.getUser().getId().equals(viewer.getId());
+        String photo = profilePhotoUrl(targetUserId);
 
         if (self || (viewer != null && viewer.isStaff())) {
-            return ProfileResponse.of(profile);
+            return ProfileResponse.of(profile, photo);
         }
         if (!profile.getUser().isApproved() || !profile.isDiscoverable()) {
             throw ApiException.notFound("Profile");
         }
-        return ProfileResponse.publicView(profile);
+        return ProfileResponse.publicView(profile, photo);
+    }
+
+    /**
+     * Replaces the profile picture.
+     *
+     * <p>The old file is deleted after the new key is written, not before: losing
+     * the upload halfway would otherwise leave the profile with no picture and no
+     * way back to the one it had.
+     */
+    @Transactional
+    public ProfileResponse setAvatar(User user, MultipartFile file) {
+        uploadValidator.validateImage(file);
+
+        Profile profile = requireProfile(user.getId());
+        String previous = profile.getAvatarStorageKey();
+
+        StoredFile stored = storageService.store(file, "avatars/" + user.getId());
+        profile.setAvatarStorageKey(stored.storageKey());
+        profile.setAvatarContentType(stored.contentType());
+        Profile saved = profileRepository.save(profile);
+
+        if (previous != null && !previous.equals(stored.storageKey())) {
+            storageService.delete(previous);
+        }
+        return ProfileResponse.of(saved, profilePhotoUrl(user.getId(), saved));
+    }
+
+    @Transactional
+    public void removeAvatar(User user) {
+        Profile profile = requireProfile(user.getId());
+        String key = profile.getAvatarStorageKey();
+        profile.setAvatarStorageKey(null);
+        profile.setAvatarContentType(null);
+        profileRepository.save(profile);
+        if (key != null) {
+            storageService.delete(key);
+        }
+    }
+
+    /** The bytes of somebody's profile picture, for the public avatar endpoint. */
+    @Transactional(readOnly = true)
+    public AvatarDownload avatar(UUID userId) {
+        Profile profile = requireProfile(userId);
+        if (!profile.hasAvatar()) {
+            throw ApiException.notFound("Profile picture");
+        }
+        return new AvatarDownload(
+                storageService.load(profile.getAvatarStorageKey()),
+                profile.getAvatarContentType());
+    }
+
+    public record AvatarDownload(org.springframework.core.io.Resource resource, String contentType) {
+    }
+
+    private String profilePhotoUrl(UUID userId) {
+        return profilePhotoUrl(userId, null);
+    }
+
+    /**
+     * The profile picture as a fetchable path, or null when none is set.
+     *
+     * <p>Falls back to a gallery photo flagged primary, which is where profile
+     * pictures lived before they had a field of their own. Existing accounts keep
+     * showing the picture they already had; anything set from now on is the real
+     * avatar.
+     */
+    private String profilePhotoUrl(UUID userId, Profile known) {
+        Profile profile = known != null ? known : profileRepository.findByUserId(userId).orElse(null);
+        if (profile != null && profile.hasAvatar()) {
+            return "/api/v1/members/" + userId + "/photo";
+        }
+        return mediaRepository
+                .findFirstByUserIdAndPrimaryTrueAndStatus(userId, com.nightgals.media.MediaStatus.APPROVED)
+                .map(m -> "/api/v1/media/" + m.getId() + "/file")
+                .orElse(null);
     }
 
     @Transactional(readOnly = true)

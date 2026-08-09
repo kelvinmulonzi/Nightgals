@@ -100,12 +100,19 @@ public class FeedService {
             int lockedPhotos = 0;
             int lockedVideos = 0;
             Long cheapest = null;
+            // The photo she actually chose to lead with. Carried separately from
+            // freePhotoUrls because "first free photo" is whatever happens to sort
+            // first, which is not the same thing and changes as she posts.
+            String profilePhotoUrl = null;
 
             for (MediaAsset asset : media) {
                 if (viewable.contains(asset.getId())) {
                     String url = "/api/v1/media/" + asset.getId() + "/file";
                     if (asset.getType() == MediaType.PHOTO) {
                         freePhotoUrls.add(url);
+                        if (asset.isPrimary()) {
+                            profilePhotoUrl = url;
+                        }
                     } else {
                         freeVideoUrls.add(url);
                     }
@@ -126,6 +133,7 @@ public class FeedService {
 
             return MemberCardResponse.of(
                     profile,
+                    profilePhotoUrl,
                     freePhotoUrls,
                     freeVideoUrls,
                     lockedPhotos,

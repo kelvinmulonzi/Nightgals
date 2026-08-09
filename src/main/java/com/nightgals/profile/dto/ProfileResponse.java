@@ -47,12 +47,22 @@ public record ProfileResponse(
                 example = "237689686224")
         String whatsappNumber,
 
+        @Schema(description = """
+                The profile picture, as a path to fetch. Null when none is set - show
+                a placeholder rather than a broken image.
+                """, example = "/api/v1/media/9e6764e7-.../file")
+        String profilePhotoUrl,
+
         Instant createdAt,
         Instant updatedAt) {
 
     /** Full view, for the owner or staff. */
     public static ProfileResponse of(Profile profile) {
-        return build(profile, profile.getDisplayName(), profile.getDateOfBirth());
+        return of(profile, null);
+    }
+
+    public static ProfileResponse of(Profile profile, String profilePhotoUrl) {
+        return build(profile, profile.getDisplayName(), profile.getDateOfBirth(), profilePhotoUrl);
     }
 
     /**
@@ -69,10 +79,15 @@ public record ProfileResponse(
      * <p>Prices live on the items themselves now, so there is none to withhold.
      */
     public static ProfileResponse publicView(Profile profile) {
-        return build(profile, profile.getDisplayName(), null);
+        return publicView(profile, null);
     }
 
-    private static ProfileResponse build(Profile profile, String displayName, LocalDate dateOfBirth) {
+    public static ProfileResponse publicView(Profile profile, String profilePhotoUrl) {
+        return build(profile, profile.getDisplayName(), null, profilePhotoUrl);
+    }
+
+    private static ProfileResponse build(Profile profile, String displayName,
+                                         LocalDate dateOfBirth, String profilePhotoUrl) {
         return new ProfileResponse(
                 profile.getId(),
                 profile.getUser().getId(),
@@ -89,6 +104,7 @@ public record ProfileResponse(
                 profile.getUser().getVerificationStatus(),
                 profile.getUser().getVerificationStatus() == VerificationStatus.APPROVED,
                 profile.getWhatsappNumber(),
+                profilePhotoUrl,
                 profile.getCreatedAt(),
                 profile.getUpdatedAt());
     }

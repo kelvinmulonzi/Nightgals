@@ -122,6 +122,15 @@ nightgals:
     # detection for existing rows, so set it once, per environment, and keep it.
     document-hash-pepper: ${DOCUMENT_HASH_PEPPER:dev-only-pepper-change-me}
 
+  # Short staff-posted clips on the public site.
+  reels:
+    # How long one stays up. Reads filter on the stored expiry, so changing this
+    # affects new reels only - existing ones keep the deadline they were given.
+    lifetime: ${REELS_LIFETIME:PT24H}
+    # Deletes expired rows and their files. Hourly is enough: the read filter is
+    # what makes the deadline exact, this only reclaims storage.
+    purge-cron: "0 5 * * * *"
+
   monetization:
     # Master switch. false makes everything free and every paywall check pass.
     enabled: ${MONETIZATION_ENABLED:true}

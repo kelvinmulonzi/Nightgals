@@ -14,6 +14,15 @@ public interface MediaRepository extends JpaRepository<MediaAsset, UUID> {
 
     List<MediaAsset> findByUserIdOrderByPositionAscCreatedAtAsc(UUID userId);
 
+    /**
+     * The photo this member chose to lead with.
+     *
+     * <p>Filtered on status too: an item pulled by a moderator must stop being
+     * somebody's profile picture the moment it is pulled, not stay on show
+     * because it happens to still carry the flag.
+     */
+    java.util.Optional<MediaAsset> findFirstByUserIdAndPrimaryTrueAndStatus(UUID userId, MediaStatus status);
+
     List<MediaAsset> findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(UUID userId, MediaStatus status);
 
     long countByUserIdAndType(UUID userId, MediaType type);

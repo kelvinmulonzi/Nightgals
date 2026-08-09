@@ -91,6 +91,11 @@ public class SecurityConfig {
                         // Without this the preview URLs above would be dead links.
                         // MediaService still refuses anything past the free preview.
                         .requestMatchers(HttpMethod.GET, "/api/v1/media/*/file").permitAll()
+                        // Reels are the shop window: promotional, free, and pointless
+                        // behind a login. Listed before the /admin/** rule below, which
+                        // still guards posting and removing them.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/reels").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/reels/*/file").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasAnyRole("MODERATOR", "ADMIN")
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
                         .anyRequest().authenticated())

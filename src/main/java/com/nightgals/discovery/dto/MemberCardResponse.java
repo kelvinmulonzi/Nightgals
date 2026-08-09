@@ -29,6 +29,13 @@ public record MemberCardResponse(
                 """)
         boolean verified,
 
+        @Schema(description = """
+                The photo this member chose to lead with. Null when she has not set
+                one, in which case a client should fall back to the first free photo
+                and then to a placeholder - never to a blank tile.
+                """, example = "/api/v1/media/9e6764e7-.../file")
+        String profilePhotoUrl,
+
         int age,
         Gender gender,
         String city,
@@ -65,6 +72,7 @@ public record MemberCardResponse(
         @Schema(example = "XAF") String currency) {
 
     public static MemberCardResponse of(Profile profile,
+                                        String profilePhotoUrl,
                                         List<String> freePhotoUrls,
                                         List<String> freeVideoUrls,
                                         int lockedPhotoCount,
@@ -81,6 +89,7 @@ public record MemberCardResponse(
                 profile.getDisplayName(),
                 profile.getUser().getVerificationStatus()
                         == com.nightgals.user.VerificationStatus.APPROVED,
+                profilePhotoUrl,
                 profile.getAge(),
                 profile.getGender(),
                 profile.getCity(),

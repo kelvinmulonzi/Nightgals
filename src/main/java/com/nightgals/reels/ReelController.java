@@ -1,0 +1,67 @@
+package com.nightgals.reels;
+
+import com.nightgals.common.ErrorResponse;
+import com.nightgals.reels.dto.ReelResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.UUID;
+
+@Tag(name = "9. Reels", description = """
+        Short clips on the public site, posted by staff. **Public - no sign-in required.**
+
+        Each one is live for 24 hours and then deletes itself, files and all. Expired
+        reels are gone from the listing immediately and return 404 on their file, even
+        in the window before the purge sweep removes the row.
+        """)
+@RestController
+@RequestMapping("/api/v1/reels")
+@RequiredArgsConstructor
+public class ReelController {
+
+    private final ReelService reelService;
+
+    @Operation(summary = "The reels showing right now",
+            description = "Newest first. Empty when nothing is live.",
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "Live reels")
+    @GetMapping
+    public List<ReelResponse> live() {
+        return reelService.live();
+    }
+
+    @Operation(summary = "Fetch a reel's video",
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "The file")
+    @ApiResponse(responseCode = "404", description = "No such reel, or it has expired",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/{reelId}/file")
+    public ResponseEntity<Resource> file(@PathVariable UUID reelId) {
+        var download = reelService.download(reelId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(
+                        download.contentType() == null
+                                ? MediaType.APPLICATION_OCTET_STREAM_VALUE
+                                : download.contentType()))
+                // Play it, do not save it - the same treatment paid media gets.
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                // Public, but never cached beyond the reel's own life: a proxy
+                // holding one for a day would outlive the reel itself.
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=300")
+                .body(download.resource());
+    }
+}
