@@ -290,6 +290,12 @@ nightgals:
     cancel-url: ${STRIPE_CANCEL_URL:${APP_BASE_URL:http://localhost:5173}/checkout/cancelled?purchase={purchaseId}}
     # How long the hosted page stays payable. Stripe permits 30m to 24h and
     # rejects anything else, so this is clamped rather than passed through.
+    # Only for accounts with Managed Payments switched on, where Stripe is the
+    # merchant of record and needs every item classified for tax. Blank disables
+    # Managed Payments per session, which is how accounts without it behave.
+    # A tax code is a statement about what you sell - pick it deliberately:
+    # https://docs.stripe.com/tax/tax-codes
+    tax-code: ${STRIPE_TAX_CODE:}
     session-ttl: PT2H
     reconcile-cron: "0 */2 * * * *"
     # Must exceed session-ttl: a page Stripe still considers payable must not be

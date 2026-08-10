@@ -81,6 +81,21 @@ public class StripeGateway {
      * appears on the payment itself when somebody is chasing a dispute months
      * later and has only the charge in front of them.
      */
+    /**
+     * The line item's product, carrying a tax code only when one is configured.
+     *
+     * <p>Stripe rejects an unrecognised code, so an empty setting means "do not
+     * send the field" rather than "send an empty one".
+     */
+    private SessionCreateParams.LineItem.PriceData.ProductData productData(String description) {
+        var product = SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                .setName(description);
+        if (properties.taxCode() != null && !properties.taxCode().isBlank()) {
+            product.setTaxCode(properties.taxCode());
+        }
+        return product.build();
+    }
+
     public Session createSession(Purchase purchase, String description, String buyerEmail)
             throws StripeException {
 
@@ -105,12 +120,27 @@ public class StripeGateway {
                                 // provider is asked for anything.
                                 .setUnitAmount(purchase.getAmountMinor())
                                 .setCurrency(purchase.getCurrency().toLowerCase(java.util.Locale.ROOT))
-                                .setProductData(SessionCreateParams.LineItem.PriceData.ProductData
-                                        .builder()
-                                        .setName(description)
-                                        .build())
+                                .setProductData(productData(description))
                                 .build())
                         .build());
+
+        // ── Managed Payments ────────────────────────────────────────────────
+        // Some accounts have Stripe's Managed Payments switched on by default.
+        // With it on, Stripe is the merchant of record and works out the tax,
+        // which it can only do if every line item carries a product tax code -
+        // without one the session is refused outright and no card can be taken.
+        //
+        // A tax code is a statement about what is being sold, with real tax
+        // consequences, so it is configuration rather than something guessed
+        // here. Set nightgals.stripe.tax-code to opt in; leave it blank and
+        // Managed Payments is switched off for the session, which is how an
+        // account without it behaves anyway.
+        if (properties.taxCode() != null && !properties.taxCode().isBlank()) {
+            // Nothing else to do - the code is attached to the product above.
+            log.debug("Stripe session using tax code {}", properties.taxCode());
+        } else {
+            params.putExtraParam("managed_payments[enabled]", false);
+        }
 
         // Lets Stripe send its own receipt, and saves the payer typing it. Absent
         // only for accounts that somehow have no address on file.

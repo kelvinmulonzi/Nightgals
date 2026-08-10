@@ -82,5 +82,21 @@ public record StripeProperties(
          * payable must not be failed underneath the payer. The sweep mostly
          * settles on session status well before this matters.
          */
-        Duration reconcileWindow) {
+        Duration reconcileWindow,
+
+        /**
+         * Product tax code sent with every line item, e.g. {@code txcd_10000000}.
+         *
+         * <p>Only needed by accounts with Stripe's Managed Payments enabled, where
+         * Stripe is the merchant of record and computes the tax - it refuses any
+         * session whose items are not classified. Blank switches Managed Payments
+         * off per session instead, which is how an account without it already
+         * behaves.
+         *
+         * <p>Left unset on purpose. A tax code says what is being sold and carries
+         * real tax consequences, so it is a decision for whoever runs the business,
+         * not a default worth inventing. Codes are listed at
+         * https://docs.stripe.com/tax/tax-codes
+         */
+        String taxCode) {
 }
