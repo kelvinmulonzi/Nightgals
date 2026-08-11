@@ -4,7 +4,12 @@ package com.nightgals.referral;
 public enum CreditReason {
     /** Somebody they invited bought their first package. Always positive. */
     REFERRAL_BONUS,
-    /** Put towards a purchase. Always negative. */
+    /**
+     * Balance bought with real money, through a settled CREDIT_TOPUP purchase.
+     * Always positive.
+     */
+    TOPUP,
+    /** Put towards a purchase, or spent on a gift. Always negative. */
     SPEND,
     /** A spend reversed because the purchase it paid for did not stand. */
     REFUND,

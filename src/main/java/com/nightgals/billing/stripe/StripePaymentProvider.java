@@ -63,10 +63,18 @@ public class StripePaymentProvider implements PaymentProvider {
         return "Visa, Mastercard and others, on a secure Stripe page.";
     }
 
-    /** The publishable key. Public by design - see {@link PaymentProvider#clientKey()}. */
+    /**
+     * The publishable key. Public by design - see {@link PaymentProvider#clientKey()}.
+     *
+     * <p>Null rather than empty when unset, so the field drops out of the
+     * response entirely instead of arriving as {@code ""} - which reads as "a key
+     * exists" to a client that only checks presence, and fails inside Stripe.js
+     * rather than here.
+     */
     @Override
     public String clientKey() {
-        return gateway.publishableKey();
+        String key = gateway.publishableKey();
+        return key == null || key.isBlank() ? null : key;
     }
 
     @Override
@@ -133,6 +141,9 @@ public class StripePaymentProvider implements PaymentProvider {
                     : "Nightgals " + purchase.getPackageCode().name().replace('_', ' ').toLowerCase()
                       + " package";
             case LIVE_EXTENSION -> purchase.getExtensionMinutes() + " extra live minutes";
+            // Named for what the payer will recognise on a statement weeks later.
+            // "Nightgals access" would read as a subscription they never took out.
+            case CREDIT_TOPUP -> "Nightgals balance top-up";
             case PROFILE_UNLOCK, SUBSCRIPTION -> "Nightgals access";
         };
     }

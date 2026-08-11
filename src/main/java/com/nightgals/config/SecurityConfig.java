@@ -53,6 +53,10 @@ public class SecurityConfig {
             // The payment picker, so a checkout screen can render its options
             // before sign-in. Reads configuration, exposes no account data.
             "/api/v1/billing/payment-methods",
+            // The gift catalogue, for the same reason: somebody deciding whether
+            // to sign up should be able to see what sending one costs. Reads
+            // configuration only - sending one is authenticated, below.
+            "/api/v1/live/gifts",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",

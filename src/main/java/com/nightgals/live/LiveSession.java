@@ -41,11 +41,19 @@ public class LiveSession extends BaseEntity {
     @Column(nullable = false, length = 120)
     private String title;
 
-    /** A free broadcast is open to anyone; an exclusive one needs a paying viewer. */
+    /**
+     * A free broadcast is open to anyone; an exclusive one needs a paying viewer.
+     *
+     * <p>Free by default. Broadcasts earn through gifts sent while they run
+     * rather than through a door charge, and a paywall in front of the stream
+     * works against that: nobody tips a creator they never got to watch. The
+     * exclusive tier stays available for a creator who genuinely wants to sell
+     * tickets to one show.
+     */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 10)
     @Builder.Default
-    private com.nightgals.media.ContentTier tier = com.nightgals.media.ContentTier.EXCLUSIVE;
+    private com.nightgals.media.ContentTier tier = com.nightgals.media.ContentTier.FREE;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

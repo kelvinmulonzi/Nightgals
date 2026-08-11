@@ -58,6 +58,18 @@ public record StripeProperties(
         String cancelUrl,
 
         /**
+         * What {@link #successUrl} and {@link #cancelUrl} are built from when
+         * either is left blank.
+         *
+         * <p>Exists because a placeholder default only applies when the variable
+         * is <em>absent</em>: {@code STRIPE_SUCCESS_URL=} in an env file is
+         * present and empty, which beats {@code ${STRIPE_SUCCESS_URL:...}} and
+         * leaves the URL empty rather than defaulted. Deriving the fallback in
+         * code instead means a blank behaves the way everyone reads it.
+         */
+        String returnBaseUrl,
+
+        /**
          * How long the hosted page stays payable.
          *
          * <p>Stripe permits 30 minutes to 24 hours and rejects anything outside
@@ -82,5 +94,22 @@ public record StripeProperties(
          * payable must not be failed underneath the payer. The sweep mostly
          * settles on session status well before this matters.
          */
-        Duration reconcileWindow) {
+        Duration reconcileWindow,
+
+        /**
+         * Whether Stripe acts as merchant of record, calculating and remitting
+         * sales tax itself.
+         *
+         * <p>Off, and deliberately. Newer accounts have Managed Payments switched
+         * on by default, and it requires every line item to carry a Stripe tax
+         * code - so leaving it on rejects each checkout with
+         * {@code the product tax code is missing} rather than opening a page. It
+         * also has eligibility rules this platform's content does not obviously
+         * meet.
+         *
+         * <p>Switching it on means classifying every purchase type with a
+         * {@code txcd_} code first; until then the platform settles tax itself,
+         * which is what it did before Managed Payments existed.
+         */
+        boolean managedPayments) {
 }

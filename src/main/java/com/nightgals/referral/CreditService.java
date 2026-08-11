@@ -80,6 +80,71 @@ public class CreditService {
     }
 
     /**
+     * Adds balance bought with real money.
+     *
+     * <p>Called only from settlement, never from checkout: crediting on the
+     * strength of a PENDING purchase would hand out spendable balance for a
+     * card that has not cleared, and a gift sent from it cannot be taken back
+     * off the creator once it is on screen.
+     *
+     * <p>Idempotent per purchase, because settlement is not: a webhook and the
+     * reconciliation sweep can both land on the same top-up, and a second entry
+     * would silently double somebody's money.
+     */
+    @Transactional
+    public void topUp(User user, Purchase purchase) {
+        long amount = purchase.getAmountMinor();
+        if (amount <= 0) {
+            return;
+        }
+        if (creditRepository.existsByPurchaseIdAndReason(purchase.getId(), CreditReason.TOPUP)) {
+            log.debug("Top-up for purchase {} already credited", purchase.getId());
+            return;
+        }
+        creditRepository.save(CreditEntry.builder()
+                .user(user)
+                .amountMinor(amount)
+                .currency(purchase.getCurrency())
+                .reason(CreditReason.TOPUP)
+                .purchase(purchase)
+                .note("Balance top-up")
+                .build());
+
+        log.info("{} credited to {} from top-up {}",
+                Money.withCurrency(amount, purchase.getCurrency()), user.getId(), purchase.getId());
+    }
+
+    /**
+     * Takes credit for something bought outright with balance rather than at
+     * checkout - a gift, which has no purchase behind it.
+     *
+     * @throws com.nightgals.common.ApiException 409 {@code insufficient_credit}
+     *         when the balance will not cover it. Deliberately all-or-nothing:
+     *         a partly-paid gift is not a thing, unlike a partly-paid purchase.
+     */
+    @Transactional
+    public void spend(User user, long amountMinor, String note) {
+        if (amountMinor <= 0) {
+            throw com.nightgals.common.ApiException.badRequest(
+                    "invalid_amount", "Amount must be positive");
+        }
+        long balance = creditRepository.balanceOf(user.getId());
+        if (balance < amountMinor) {
+            throw com.nightgals.common.ApiException.conflict("insufficient_credit",
+                    "Your balance is " + Money.withCurrency(balance, properties.currency())
+                    + ". Top up to continue.");
+        }
+        creditRepository.save(CreditEntry.builder()
+                .user(user)
+                // Negative: this is credit leaving the account.
+                .amountMinor(-amountMinor)
+                .currency(properties.currency())
+                .reason(CreditReason.SPEND)
+                .note(note)
+                .build());
+    }
+
+    /**
      * Puts credit back after a purchase it paid for was reversed.
      *
      * <p>Recorded as a fresh positive entry rather than by deleting the spend:

@@ -83,8 +83,11 @@ public class LiveSessionService {
         }
         quotaService.requireDurationFits(host, request.durationMinutes());
 
+        // Free unless she asks otherwise. Broadcasts earn through gifts sent while
+        // they run rather than a door charge, and a paywall in front of the stream
+        // works against that: nobody gifts a creator they never got to watch.
         var tier = request.tier() == null
-                ? com.nightgals.media.ContentTier.EXCLUSIVE : request.tier();
+                ? com.nightgals.media.ContentTier.FREE : request.tier();
 
         LiveSession session = sessionRepository.save(LiveSession.builder()
                 .host(host)

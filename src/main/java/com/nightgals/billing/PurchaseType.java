@@ -30,6 +30,21 @@ public enum PurchaseType {
     LIVE_EXTENSION,
 
     /**
+     * A viewer loading their credit balance.
+     *
+     * <p>The only type that buys no content. It exists because gifts have to be
+     * instant: a card redirect per gift would send the payer out of the
+     * broadcast and back for every one, which is no way to tip somebody who is
+     * live. So the money is taken once, up front, and spent from the ledger
+     * afterwards at no cost.
+     *
+     * <p>Produces no earnings entry - nobody has earned anything yet. The
+     * creator's share is recorded when a gift is actually sent, against whoever
+     * received it.
+     */
+    CREDIT_TOPUP,
+
+    /**
      * Retired: one payment opened everything a creator had posted. Kept because
      * historical rows still carry it and their receipts still have to render.
      * Nothing creates new ones.

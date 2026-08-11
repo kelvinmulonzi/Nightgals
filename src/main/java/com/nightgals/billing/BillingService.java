@@ -1,6 +1,7 @@
 package com.nightgals.billing;
 
 import com.nightgals.billing.dto.CheckoutResponse;
+import com.nightgals.billing.dto.CreditBalanceResponse;
 import com.nightgals.billing.dto.EntitlementResponse;
 import com.nightgals.billing.dto.PurchaseResponse;
 import com.nightgals.calls.VideoCall;
@@ -112,6 +113,52 @@ public class BillingService {
                         .build()));
 
         return checkout(buyer, purchase, provider, choice);
+    }
+
+    /**
+     * A viewer loading their balance, which is what gifts are sent from.
+     *
+     * <p>The amount is the buyer's, not a creator's price, so it is validated
+     * here rather than looked up. Deliberately not reusing a PENDING top-up the
+     * way the item purchases do: somebody who started a 5 000 top-up and then
+     * decided on 20 000 means the second figure, and silently charging the first
+     * would be wrong.
+     */
+    @Transactional
+    public CheckoutResponse buyCredit(User buyer, long amountMinor, PaymentChoice choice) {
+        requireMonetisationOn();
+
+        MonetizationProperties.CreditTopUp limits = properties.creditTopUp();
+        if (limits == null) {
+            throw ApiException.conflict("topup_disabled", "Balance top-ups are not available");
+        }
+        if (amountMinor < limits.floor() || amountMinor > limits.ceiling()) {
+            throw ApiException.badRequest("invalid_amount",
+                    "Top up between " + Money.withCurrency(limits.floor(), properties.currency())
+                    + " and " + Money.withCurrency(limits.ceiling(), properties.currency()));
+        }
+
+        PaymentProvider provider = paymentProviders.resolve(choice.method());
+
+        Purchase purchase = purchaseRepository.save(Purchase.builder()
+                .user(buyer)
+                .type(PurchaseType.CREDIT_TOPUP)
+                .amountMinor(amountMinor)
+                .currency(properties.currency())
+                .status(PurchaseStatus.PENDING)
+                .provider(provider.name())
+                .build());
+
+        return checkout(buyer, purchase, provider, choice);
+    }
+
+    /** What is on account, and the bounds a top-up has to fall inside. */
+    @Transactional(readOnly = true)
+    public CreditBalanceResponse creditBalance(User user) {
+        return CreditBalanceResponse.of(
+                creditService.balanceOf(user.getId()),
+                properties.creditTopUp(),
+                properties.currency());
     }
 
     /** A viewer buying entry to one broadcast, on the deployment's default method. */
@@ -320,7 +367,13 @@ public class BillingService {
             purchase.setProviderReference(null);
         }
 
-        CreditService.Applied credit = creditService.applyTo(buyer, purchase);
+        // Never against a top-up. Paying for balance with balance is circular:
+        // 5 000 of credit would cover a 5 000 top-up, settle it without a payment,
+        // and hand back the 5 000 it just consumed - an infinite supply of money
+        // for anybody who noticed. A top-up is only ever bought with real money.
+        CreditService.Applied credit = purchase.getType() == PurchaseType.CREDIT_TOPUP
+                ? new CreditService.Applied(0, purchase.getAmountMinor())
+                : creditService.applyTo(buyer, purchase);
         purchase.setCreditAppliedMinor(credit.creditUsedMinor());
 
         if (credit.coversEverything()) {
@@ -422,6 +475,10 @@ public class BillingService {
                 grantCreatorPackage(purchase);
                 referralService.onPurchaseSettled(purchase);
             }
+            // No earnings entry: nobody has earned anything yet. The creator's
+            // share is recorded when a gift is actually sent, against whoever
+            // received it - see GiftService.
+            case CREDIT_TOPUP -> creditService.topUp(purchase.getUser(), purchase);
             case LIVE_EXTENSION -> liveQuotaService.grantMinutes(
                     purchase.getUser(),
                     purchase.getExtensionDate(),

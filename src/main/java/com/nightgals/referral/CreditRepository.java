@@ -24,6 +24,14 @@ public interface CreditRepository extends JpaRepository<CreditEntry, UUID> {
     /** Guards the once-per-referred-account rule before the index has to. */
     boolean existsByReferredUserIdAndReason(UUID referredUserId, CreditReason reason);
 
+    /**
+     * Whether a top-up has already been credited.
+     *
+     * <p>Settlement can arrive twice - once by webhook, once by the
+     * reconciliation sweep - and the second must not double the balance.
+     */
+    boolean existsByPurchaseIdAndReason(UUID purchaseId, CreditReason reason);
+
     /** How many of a referrer's invitations actually converted. */
     long countByUserIdAndReason(UUID userId, CreditReason reason);
 }

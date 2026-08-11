@@ -89,6 +89,40 @@ public class EarningsService {
     }
 
     /**
+     * The creator's share of a gift sent during her broadcast.
+     *
+     * <p>No purchase to guard against, because a gift is spent from a balance
+     * rather than bought at checkout - the money was already taken when the
+     * balance was topped up. The gift row is created once inside the same
+     * transaction, so this is called exactly once by construction rather than
+     * being made idempotent after the fact.
+     *
+     * <p>Held like any other earning. The credit behind it came from a card that
+     * can be charged back weeks later, and money already paid out cannot be
+     * taken back off a creator.
+     */
+    @Transactional
+    public void recordGiftEarning(User creator, long amountMinor, String currency) {
+        if (amountMinor <= 0) {
+            return;
+        }
+        Split split = split(amountMinor);
+        Instant availableAt = Instant.now().plus(properties.holdPeriod());
+        earningRepository.save(Earning.builder()
+                .creator(creator)
+                .type(EarningType.GIFT)
+                .grossMinor(split.gross())
+                .commissionMinor(split.commission())
+                .netMinor(split.net())
+                .currency(currency)
+                .status(statusFor(availableAt))
+                .availableAt(availableAt)
+                .build());
+
+        log.info("Creator {} earned {} minor units from a gift", creator.getId(), split.net());
+    }
+
+    /**
      * Notes that a subscriber consumed a creator's paid content, so the creator
      * takes a share of that subscriber's payment for the period.
      *

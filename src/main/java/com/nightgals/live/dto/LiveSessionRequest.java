@@ -33,8 +33,13 @@ public record LiveSessionRequest(
         @Min(1) @Max(720) Integer durationMinutes,
 
         @Schema(description = """
-                `FREE` lets anyone watch, including anonymous visitors - useful for pulling
-                people in. `EXCLUSIVE` (the default) is sold per broadcast.
+                `FREE` (the default) lets anyone watch, including anonymous visitors. That
+                is how a broadcast normally earns now - through gifts sent while it runs,
+                not a door charge, and nobody gifts a creator they were not allowed to
+                watch.
+
+                `EXCLUSIVE` still sells entry per broadcast, for a creator who genuinely
+                wants to ticket one show.
                 """)
         com.nightgals.media.ContentTier tier,
 
