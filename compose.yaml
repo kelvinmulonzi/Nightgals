@@ -57,6 +57,32 @@ services:
       echo 'bucket nightgals-media ready'
       "
 
+  # The actual video, which this application deliberately does not handle.
+  #
+  # Nightgals stores a playbackUrl and decides who may see it; something else has
+  # to serve the stream. Owncast is that something for local work: OBS or a phone
+  # pushes RTMP in, it transcodes to HLS, and the .m3u8 it publishes is what goes
+  # in a session's playbackUrl.
+  #
+  # Self-hosted rather than a hosted API on purpose. It costs nothing per minute,
+  # and no third party's content policy applies to what gets broadcast - which
+  # rules out YouTube and Twitch for this platform whatever their free tier says.
+  #
+  # Admin at http://localhost:8090/admin (admin / abc123). Push RTMP to
+  # rtmp://localhost:1935/live with stream key abc123. Both are Owncast defaults
+  # and both must be changed before this is reachable from anywhere but a laptop.
+  owncast:
+    image: 'owncast/owncast:latest'
+    container_name: nightgals-owncast
+    ports:
+      # 8090 outside, because 8080 is the Spring application's.
+      - '8090:8080'
+      # RTMP ingest - what OBS and mobile broadcast apps push to.
+      - '1935:1935'
+    volumes:
+      - nightgals-owncast:/app/data
+
 volumes:
   nightgals-pgdata:
   nightgals-minio:
+  nightgals-owncast:

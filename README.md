@@ -27,7 +27,7 @@ Two things make it different from a normal dating app:
 ## Run it
 
 ```bash
-docker compose up -d      # Postgres on :5433, MinIO on :9000 (console :9001)
+docker compose up -d      # Postgres :5433, MinIO :9000 (console :9001), Owncast :8090
 BOOTSTRAP_ADMIN_PASSWORD='ChangeMe123!' ./mvnw spring-boot:run
 ```
 
@@ -41,7 +41,7 @@ who can approve the first member. It is only used once; later starts ignore it.
 > was already using 5432 on this machine. Change it in `compose.yaml` if you like.
 
 ```bash
-./mvnw test          # 95 tests, spins up a throwaway Postgres via Testcontainers
+./mvnw test          # 139 tests, spins up a throwaway Postgres via Testcontainers
 ```
 
 Sign-in codes are emailed, so a machine with no outbound SMTP needs
@@ -187,8 +187,10 @@ curl -X POST /api/v1/me/media/photos -F file=@shot.jpg -F tier=EXCLUSIVE
 curl -X PATCH /api/v1/me/media/{id} -d '{"tier":"FREE"}'
 ```
 
-Live sessions take the same `tier` — a free broadcast pulls people in, an
-exclusive one is for paying viewers.
+Live sessions take the same `tier`, but default the other way: **broadcasts are
+`FREE` unless the host says otherwise**, because a live earns through gifts sent
+while it runs rather than a door charge. Media still defaults to `EXCLUSIVE` —
+that is the thing being sold.
 
 **The profile picture is always `FREE`.** The first photo a creator uploads
 becomes it, and it cannot be moved behind the paywall — a card with no image
@@ -276,17 +278,45 @@ Prices, durations and plans are all configuration (`nightgals.monetization`).
 `enabled: false` turns the whole paywall off and makes every entitlement check
 pass — useful for a launch period.
 
-### No payment provider is integrated yet
+### Payment providers
 
-That is deliberate, and the seam is clean. A purchase is created; the configured
-`PaymentProvider` says how to pay; access is granted in exactly one place.
-Nothing else in the codebase knows how money arrives. Pick one with
-`nightgals.monetization.provider`:
+Several run at once and the buyer picks per checkout. List them in
+`nightgals.monetization.providers`, in the order a picker should show them:
+
+```
+PAYMENT_PROVIDERS=momo,stripe
+DEFAULT_PAYMENT_PROVIDER=momo      # what a checkout naming no method gets
+```
 
 | | Behaviour | Admin involved? |
 |---|---|---|
-| `auto` **(default)** | Purchase is `COMPLETED` before the response is written. `action: NONE`. | No |
+| `momo` | MTN Mobile Money. A prompt goes to the payer's handset; the purchase stays `PENDING` until they approve. Needs `payerMsisdn`. | No |
+| `stripe` | Cards, on a Stripe-hosted page. Returns `action: REDIRECT` and a URL. Card details never touch this server, so the platform stays out of PCI scope. | No |
 | `manual` | Purchase stays `PENDING` with instructions. | Yes |
+| `auto` | Purchase is `COMPLETED` before the response is written. `action: NONE`. | No |
+
+`GET /api/v1/billing/payment-methods` is what a checkout screen renders from —
+codes, labels, whether a phone number is required, and the publishable key. Every
+buy endpoint takes an optional `method`; omitting it uses the default, so clients
+written before the picker still work.
+
+Beans are conditional on the list, so a method left out has no beans at all rather
+than beans nobody can reach. Listing one without its credentials **fails
+startup** on purpose: a card button quietly missing in production is worse than a
+boot that says why.
+
+Settlement never trusts a callback's body. Both providers re-read the real status
+from the provider before granting anything, and a reconciliation sweep chases
+anything still `PENDING` — webhooks are retried but not guaranteed, and a payer
+whose card was charged while nothing unlocked is the worst outcome this system
+has. On a laptop no webhook can arrive at all, so the sweep is the only path, and
+purchases settle a couple of minutes later rather than in seconds.
+
+> **Stripe and Managed Payments.** Newer Stripe accounts enable it by default,
+> and it rejects any line item without a `txcd_` tax code — every checkout fails
+> with *"the product tax code is missing"*. Sessions explicitly opt out
+> (`STRIPE_MANAGED_PAYMENTS=false`). Turning it on means classifying every
+> `PurchaseType` first.
 
 **`auto` collects nothing.** It exists so the product can be walked end to end —
 sign up, buy a package, publish, unlock, watch — without a human confirming every
@@ -302,13 +332,31 @@ POST /api/v1/admin/billing/purchases/{id}/settle?providerReference=MPESA-XYZ
 POST /api/v1/admin/billing/grants?viewerId=…&targetId=…&duration=P30D
 ```
 
-When you wire in M-Pesa Daraja, write one class implementing `PaymentProvider` —
-STK push in `startPayment`, callback calls `settle()` — and name it in that
-property. **No access-control code changes.** Both routes to `COMPLETED` share
-one private `grant()`, so an auto-settled purchase and a webhook-settled one
-cannot drift on what they hand out. `settle()` is idempotent and
-`provider_reference` is unique per provider, so a replayed webhook cannot grant
-twice.
+Adding another — M-Pesa Daraja, say — is one class implementing `PaymentProvider`
+(push in `startPayment`, callback calls `settle()`) and one more entry in that
+list. **No access-control code changes.** Every route to `COMPLETED` shares one
+private `grant()`, so an auto-settled purchase, a webhook-settled one and one paid
+entirely in credit cannot drift on what they hand out. `settle()` is idempotent
+and `provider_reference` is unique per provider, so a replayed webhook cannot
+grant twice.
+
+### Balance
+
+```
+GET  /api/v1/billing/credit             balance, top-up bounds, one-tap presets
+POST /api/v1/billing/credit/top-up      { "amountMinor": 5000, "method": "STRIPE" }
+```
+
+Balance is not a currency of its own — it is the platform's own currency held on
+account. It is spent automatically against any purchase, which is why a package
+can settle without a payment ever happening, and it is what gifts are sent from.
+
+`CREDIT_TOPUP` is the one purchase type that buys no content, and the one that
+existing balance is **not** applied to. It produces no earnings entry: nobody has
+earned anything yet, and the creator's share is recorded when a gift is actually
+sent. Settlement credits the ledger exactly once, guarded by a unique index rather
+than a check in code — that check is a read-then-write race between the webhook
+and the reconciler, and the prize for losing it is free money.
 
 ## Creator earnings and payouts
 
@@ -404,11 +452,84 @@ use; this API decides who may see it.
 POST /api/v1/me/live                    announce or start (requires APPROVED)
 POST /api/v1/me/live/{id}/end           stop
 GET  /api/v1/live                       who is broadcasting now
-GET  /api/v1/live/{id}/playback         the URL — 402 unless the host is unlocked
+GET  /api/v1/live/{id}/playback         the URL
 ```
 
-Unpaid viewers still *see* that a session is happening (`locked: true`,
-`liveNow` on the feed card); they just cannot get the URL.
+**Broadcasts are free to watch.** `tier` defaults to `FREE`, so anyone signed in
+gets the playback URL without paying. A live earns through gifts sent while it
+runs, not a door charge — the two pull against each other, because nobody tips a
+creator they were never allowed to watch.
+
+Ticketing still exists for a creator who wants it: `tier: EXCLUSIVE` on the
+session and `POST /api/v1/billing/live/{id}` sells entry to that one broadcast.
+`playback` returns 402 for those until it is bought.
+
+### Gifts
+
+```
+GET  /api/v1/live/gifts                 the catalogue — public, no sign-in
+POST /api/v1/live/{id}/gifts            send one     { "giftCode": "ROSE" }
+GET  /api/v1/live/{id}/gifts?since=…    what has been sent, for the overlay
+```
+
+Gifts are spent from a **prepaid balance**, never paid for one at a time. A card
+redirect per gift would take the sender out of the broadcast and back for every
+one, which is no way to tip somebody who is live. So the money is taken once, up
+front, and moved instantly afterwards.
+
+That also decides the legal shape. The platform sells the balance and owes the
+creator a share of what is spent — a marketplace sale, like everything else here,
+rather than a transfer of money between two people. It reuses the same commission,
+hold period and payout path as an unlock.
+
+Polling, not push, for now: send `since` back as the `until` from the previous
+response. `until` is the *server's* clock rather than the last gift's timestamp,
+so a quiet broadcast does not keep asking from the same stale point, and gifts are
+neither replayed nor skipped when the two machines disagree about the time. Omit
+it entirely on the first call and the last 50 come back, so a late joiner does not
+face a blank overlay.
+
+The catalogue is configuration (`nightgals.gifts`), not a table — a handful of
+fixed items that change when the business changes. Re-pricing is safe: every gift
+already sent keeps the amount and label copied onto its own row, so old receipts
+and old earnings do not move.
+
+Two ways balance could be conjured, both closed and both tested. Credit is never
+applied to a top-up — that would settle it for nothing and hand back what it
+consumed. And a creator cannot gift her own broadcast, which would recycle bought
+balance into withdrawable earnings and turn a payout into a way to cash out a
+card. The second is enforced in the schema as well as the service.
+
+### Streaming locally
+
+`docker compose` brings up [Owncast](https://owncast.online/) on **:8090** — a
+self-hosted RTMP-in, HLS-out server. Self-hosted rather than a hosted API on
+purpose: it costs nothing per minute, and no third party's content policy applies
+to what gets broadcast, which rules out YouTube and Twitch here whatever their
+free tier says.
+
+```
+Admin       http://localhost:8090/admin   (admin / abc123)
+Push to     rtmp://localhost:1935/live     stream key abc123
+playbackUrl http://localhost:8090/hls/stream.m3u8
+```
+
+Both defaults are Owncast's own and must be changed before it is reachable from
+anything but a laptop. Point OBS at the RTMP URL, or push a test pattern:
+
+```bash
+ffmpeg -re -f lavfi -i "testsrc2=size=1280x720:rate=30" -f lavfi -i "sine=frequency=440" \
+  -c:v libopenh264 -b:v 2500k -g 60 -pix_fmt yuv420p \
+  -c:a aac -b:a 128k -f flv rtmp://localhost:1935/live/abc123
+```
+
+`libopenh264` rather than `libx264` because Fedora's ffmpeg ships without the
+latter; `h264_vaapi` and `h264_nvenc` also work if the hardware is there.
+
+HLS runs 10–30 seconds behind the source. Fine for proving the pipeline, but it
+is felt immediately when testing gifts — the creator reacts half a minute after
+the gift lands, and reacting is the point. WebRTC is the answer if gifting becomes
+the main revenue.
 
 ## Onboarding, which is the whole product
 
@@ -526,7 +647,16 @@ All of it in `application.yml`, overridable by environment variable. See
 | `DOCUMENT_HASH_PEPPER` | Salts the document-number hash. Set once per environment — rotating it breaks duplicate detection on existing rows. |
 | `nightgals.username.change-cooldown` | Wait between handle changes (default `P30D`) |
 | `MONETIZATION_ENABLED` | `false` makes everything free and disables every paywall |
-| `PAYMENT_PROVIDER` | `auto` (default) settles every purchase instantly and collects nothing; `manual` needs an admin |
+| `PAYMENT_PROVIDERS` | Every method on offer, comma-separated, in picker order — `momo,stripe`. Listing one without its credentials fails startup. |
+| `DEFAULT_PAYMENT_PROVIDER` | What a checkout naming no `method` gets |
+| `PAYMENT_PROVIDER` | Superseded by `PAYMENT_PROVIDERS`. Still read when that is blank, so older deployments keep working. |
+| `MOMO_*` | MTN Mobile Money: base URL, subscription key, API user and key, target environment |
+| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` | Must be the same account **and** the same mode. A live secret with a test publishable key fails in ways that do not name the cause. |
+| `STRIPE_WEBHOOK_SECRET` | Per endpoint, from the endpoint's own page — not the API keys page. Blank refuses every webhook and leaves settlement to the sweep. |
+| `STRIPE_MANAGED_PAYMENTS` | Leave `false`. `true` requires a tax code on every line item and rejects checkouts without one. |
+| `GIFTS_ENABLED` | `false` hides the catalogue and refuses every send |
+| `nightgals.gifts.catalogue` | The sendable items: code, label, emoji, price |
+| `CREDIT_MIN_TOPUP` / `CREDIT_MAX_TOPUP` | Bounds on buying balance (defaults 1 000 / 500 000) |
 | `nightgals.monetization.*` | Currency, default prices, plans, per-creator price bounds |
 | `CREATOR_PACKAGES_ENABLED` | `false` makes publishing free and restores the flat 9-photo / 3-video allowance |
 | `nightgals.creator-packages.*` | Bronze/silver/gold prices and allowances |
@@ -565,11 +695,16 @@ Scoped out deliberately, not forgotten — mutual matching, chat, party events,
 and block/report. Browsing exists but is deliberately simple: newest-first with
 a city filter, no geo radius, no ranking, no recommendation.
 
-A real payment provider is the obvious next piece; see the billing section for
-exactly what implementing one involves. Note that it needs **two** capabilities
-now — collecting from viewers *and* disbursing to creators. M-Pesa Daraja covers
-both (STK push in, B2C out), but they are separate integrations and separate
-approvals.
+Collection is done — MTN Mobile Money and Stripe both take real money. **Payouts
+are not.** That is the asymmetric half: money comes in automatically and goes out
+by hand, so every disbursement is currently a superadmin marking a batch paid.
+M-Pesa Daraja B2C or MTN's disbursement API would close it, but each is a separate
+integration and a separate approval from the collection side already built.
+
+Gift delivery is polling, not push. It works and needs no new infrastructure, but
+a gift lands a second or two late and the video it reacts to is already 10–30
+seconds behind on HLS. If gifting becomes the main revenue, WebRTC playback and an
+SSE or WebSocket gift channel are the pieces that make it feel live.
 
 Also unbuilt on the money side: automated disbursement (payouts are manual by
 design for now), tax/withholding reporting, and a creator-facing statement or
