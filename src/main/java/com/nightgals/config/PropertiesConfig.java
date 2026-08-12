@@ -8,6 +8,6 @@ import org.springframework.context.annotation.Configuration;
         MonetizationProperties.class, EarningsProperties.class, OtpProperties.class,
         NotificationProperties.class, CreatorPackageProperties.class,
         CallProperties.class, LiveProperties.class, MomoProperties.class,
-        StripeProperties.class, GiftProperties.class})
+        StripeProperties.class, GiftProperties.class, LiveKitProperties.class})
 public class PropertiesConfig {
 }

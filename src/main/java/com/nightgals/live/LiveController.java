@@ -13,6 +13,7 @@ import com.nightgals.live.dto.LiveAllowanceResponse;
 import com.nightgals.live.dto.LiveSessionRequest;
 import com.nightgals.live.dto.LiveSessionResponse;
 import com.nightgals.live.dto.SendGiftRequest;
+import com.nightgals.live.dto.StreamCredentialsResponse;
 import com.nightgals.user.AuthUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -248,14 +249,71 @@ public class LiveController {
     }
 
     @Operation(summary = "Get the playback URL for a session",
-            description = "Returns 402 when the caller has not unlocked the host, so the client can open the paywall.")
+            description = """
+                    **Superseded by `GET /live/{id}/watch`**, which returns whatever the
+                    configured provider actually needs. Kept for clients written before
+                    that existed; it has no URL to give on a provider that issues tokens
+                    instead, and 404s there.
+                    """)
     @ApiResponse(responseCode = "200", description = "The playback URL")
     @ApiResponse(responseCode = "402", description = "Host not unlocked",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @Deprecated
     @GetMapping("/live/{sessionId}/playback")
     public Map<String, String> playback(@PathVariable UUID sessionId,
                                         @AuthenticationPrincipal AuthUser principal) {
         return Map.of("playbackUrl", liveSessionService.playbackUrl(sessionId, principal.user()));
+    }
+
+    @Operation(summary = "Join a broadcast as a viewer",
+            description = """
+                    Everything the client needs to watch, from whichever provider is wired
+                    in — a URL to play for HLS, or a server, room and token for WebRTC.
+
+                    Minted per call rather than stored, and short-lived. The access check
+                    runs first, so credentials are only ever issued to somebody entitled,
+                    and they expire — which a playback URL never does once handed out.
+
+                    Ask again on reconnect rather than caching the token.
+                    """,
+            security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponse(responseCode = "200", description = "Connect with these")
+    @ApiResponse(responseCode = "402", description = "This broadcast is ticketed and unpaid",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "No such broadcast",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/live/{sessionId}/watch")
+    public StreamCredentialsResponse watch(@PathVariable UUID sessionId,
+                                           @AuthenticationPrincipal AuthUser principal) {
+        return StreamCredentialsResponse.of(
+                liveSessionService.watch(sessionId, principal.user()));
+    }
+
+    @Operation(summary = "Credentials to broadcast this session",
+            description = """
+                    What the host's own client needs to go on air. On a WebRTC provider
+                    that is a publishing token, so the creator broadcasts from inside the
+                    app — no stream key to copy, no second app to install.
+
+                    Separate from creating the session, and re-issued on demand, because
+                    these expire: a broadcast scheduled for tomorrow asks again when it
+                    actually starts.
+
+                    Restricted to the host and anyone on the roster. Publishing
+                    credentials *are* the broadcast — whoever holds them can appear on it.
+                    """,
+            security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponse(responseCode = "200", description = "Broadcast with these")
+    @ApiResponse(responseCode = "400",
+            description = "`playback_url_required` - this deployment provisions nothing, so set one yourself",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "403", description = "`not_your_session`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/me/live/{sessionId}/publish")
+    public StreamCredentialsResponse publish(@PathVariable UUID sessionId,
+                                             @AuthenticationPrincipal AuthUser principal) {
+        return StreamCredentialsResponse.of(
+                liveSessionService.publish(sessionId, principal.user()));
     }
 
     // ------------------------------------------------------------------ gifts

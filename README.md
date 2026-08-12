@@ -450,10 +450,42 @@ use; this API decides who may see it.
 
 ```
 POST /api/v1/me/live                    announce or start (requires APPROVED)
+GET  /api/v1/me/live/{id}/publish       credentials to broadcast this session
 POST /api/v1/me/live/{id}/end           stop
 GET  /api/v1/live                       who is broadcasting now
-GET  /api/v1/live/{id}/playback         the URL
+GET  /api/v1/live/{id}/watch            credentials to watch
+GET  /api/v1/live/{id}/playback         superseded by /watch
 ```
+
+### Where the video goes
+
+`nightgals.live.provider` decides. The application still serves no video; what
+changes is whether it **provisions** somewhere for one to happen.
+
+| | Behaviour |
+|---|---|
+| `manual` **(default)** | The host supplies her own `playbackUrl`. What runs against the local Owncast container, and what a creator with her own OBS setup gets. |
+| `livekit` | A room per broadcast over WebRTC. Creators publish from inside the app — no stream key to copy — and every participant gets a short-lived token. |
+
+**Owncast is single-user.** One instance carries one broadcast, so `manual` is a
+development arrangement: two creators live at once would land on the same stream
+key. Anything multi-creator needs a provider that provisions per session, which is
+the whole reason this abstraction exists.
+
+Tokens are the access boundary on `livekit`. Once a client holds one it talks to
+LiveKit directly and this server never sees it again, so they are minted **per
+request, after the entitlement check**, scoped to one room, and expire. A viewer's
+token carries `canPublish: false` — without it, a token good enough to watch is
+good enough to broadcast into somebody else's room. A stored playback URL has none
+of these properties: once handed out it is a password that cannot be revoked,
+which is the honest limitation of `manual`.
+
+Rooms are created by the first participant to arrive, so nothing calls the network
+at broadcast time. Going live cannot fail because LiveKit was briefly unreachable,
+and minting a viewer's token costs a signature rather than a round trip — which is
+what makes per-request minting affordable. LiveKit access tokens are ordinary
+HS256 JWTs with a `video` grant, so no SDK is needed; the claims in
+`LiveKitStreamProvider` are the whole protocol.
 
 **Broadcasts are free to watch.** `tier` defaults to `FREE`, so anyone signed in
 gets the playback URL without paying. A live earns through gifts sent while it
@@ -654,6 +686,10 @@ All of it in `application.yml`, overridable by environment variable. See
 | `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` | Must be the same account **and** the same mode. A live secret with a test publishable key fails in ways that do not name the cause. |
 | `STRIPE_WEBHOOK_SECRET` | Per endpoint, from the endpoint's own page — not the API keys page. Blank refuses every webhook and leaves settlement to the sweep. |
 | `STRIPE_MANAGED_PAYMENTS` | Leave `false`. `true` requires a tax code on every line item and rejects checkouts without one. |
+| `LIVE_PROVIDER` | `manual` (default) or `livekit`. See the live section. |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY` | Public — the URL is handed to every viewer; what protects a room is the token |
+| `LIVEKIT_API_SECRET` | Signs every token, so anything holding it can mint a publisher token for any room. Environment only. Shown once at creation and never again. |
+| `nightgals.livekit.token-ttl` | How long a minted token lasts (default `PT4H`) — which is how long a revoked viewer keeps access |
 | `GIFTS_ENABLED` | `false` hides the catalogue and refuses every send |
 | `nightgals.gifts.catalogue` | The sendable items: code, label, emoji, price |
 | `CREDIT_MIN_TOPUP` / `CREDIT_MAX_TOPUP` | Bounds on buying balance (defaults 1 000 / 500 000) |
