@@ -101,8 +101,8 @@ public class StripeGateway {
 
         SessionCreateParams.Builder params = SessionCreateParams.builder()
                 .setMode(SessionCreateParams.Mode.PAYMENT)
-                .setSuccessUrl(url(properties.successUrl(), purchase))
-                .setCancelUrl(url(properties.cancelUrl(), purchase))
+                .setSuccessUrl(url(properties.successUrl(), "/checkout/done", purchase))
+                .setCancelUrl(url(properties.cancelUrl(), "/checkout/cancelled", purchase))
                 .setClientReferenceId(purchase.getId().toString())
                 .setExpiresAt(Instant.now().plus(sessionTtl()).getEpochSecond())
                 .putMetadata("purchaseId", purchase.getId().toString())
@@ -124,28 +124,21 @@ public class StripeGateway {
                                 .build())
                         .build());
 
-        // ── Managed Payments ────────────────────────────────────────────────
-        // Some accounts have Stripe's Managed Payments switched on by default.
-        // With it on, Stripe is the merchant of record and works out the tax,
-        // which it can only do if every line item carries a product tax code -
-        // without one the session is refused outright and no card can be taken.
-        //
-        // A tax code is a statement about what is being sold, with real tax
-        // consequences, so it is configuration rather than something guessed
-        // here. Set nightgals.stripe.tax-code to opt in; leave it blank and
-        // Managed Payments is switched off for the session, which is how an
-        // account without it behaves anyway.
-        if (properties.taxCode() != null && !properties.taxCode().isBlank()) {
-            // Nothing else to do - the code is attached to the product above.
-            log.debug("Stripe session using tax code {}", properties.taxCode());
-        } else {
-            params.putExtraParam("managed_payments[enabled]", false);
-        }
-
         // Lets Stripe send its own receipt, and saves the payer typing it. Absent
         // only for accounts that somehow have no address on file.
         if (buyerEmail != null && !buyerEmail.isBlank()) {
             params.setCustomerEmail(buyerEmail);
+        }
+
+        if (!properties.managedPayments()) {
+            // Only ever sent to turn it OFF. Accounts created recently have
+            // Managed Payments on by default, which requires a txcd_ tax code on
+            // every line item and rejects the session without one; older accounts
+            // do not have the feature at all and ignore this. Sending false is
+            // therefore the one value that behaves the same on both.
+            params.setManagedPayments(SessionCreateParams.ManagedPayments.builder()
+                    .setEnabled(false)
+                    .build());
         }
 
         return client.checkout().sessions().create(params.build());
@@ -189,12 +182,29 @@ public class StripeGateway {
         return ttl.compareTo(MAX_TTL) > 0 ? MAX_TTL : ttl;
     }
 
-    private static String url(String template, Purchase purchase) {
-        if (template == null || template.isBlank()) {
+    /**
+     * Where Stripe sends the payer back to.
+     *
+     * <p>A blank template is normal, not a misconfiguration: {@code
+     * STRIPE_SUCCESS_URL=} in an env file is present-and-empty, which overrides
+     * the placeholder default rather than falling back to it. So an empty one
+     * means "derive it", and only an empty base as well is unrecoverable.
+     */
+    private String url(String template, String defaultPath, Purchase purchase) {
+        String resolved = template == null || template.isBlank()
+                ? base() + defaultPath + "?purchase={purchaseId}"
+                : template;
+        return resolved.replace("{purchaseId}", purchase.getId().toString());
+    }
+
+    private String base() {
+        String base = properties.returnBaseUrl();
+        if (base == null || base.isBlank()) {
             throw new IllegalStateException(
-                    "nightgals.stripe.success-url and cancel-url must both be set - "
-                    + "Stripe refuses to create a session without somewhere to return to.");
+                    "Set nightgals.stripe.success-url and cancel-url, or app-base-url to "
+                    + "derive them from - Stripe refuses to create a session without "
+                    + "somewhere to return to.");
         }
-        return template.replace("{purchaseId}", purchase.getId().toString());
+        return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }
 }

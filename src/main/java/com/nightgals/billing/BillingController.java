@@ -4,10 +4,12 @@ import com.nightgals.billing.dto.BuyPackageRequest;
 import com.nightgals.billing.dto.CheckoutRequest;
 import com.nightgals.billing.dto.CheckoutResponse;
 import com.nightgals.billing.dto.CreatorPackageResponse;
+import com.nightgals.billing.dto.CreditBalanceResponse;
 import com.nightgals.billing.dto.CreatorPackageStatusResponse;
 import com.nightgals.billing.dto.EntitlementResponse;
 import com.nightgals.billing.dto.PaymentMethodResponse;
 import com.nightgals.billing.dto.PurchaseResponse;
+import com.nightgals.billing.dto.TopUpRequest;
 import com.nightgals.common.ErrorResponse;
 import com.nightgals.common.PageResponse;
 import com.nightgals.user.AuthUser;
@@ -183,6 +185,54 @@ public class BillingController {
                                           @PathVariable UUID sessionId,
                                           @Valid @RequestBody(required = false) CheckoutRequest request) {
         return billingService.buyLiveAccess(principal.user(), sessionId, choiceOf(request));
+    }
+
+    // ------------------------------------------------------------ balance
+
+    @Operation(summary = "My balance, and what a top-up may be",
+            description = """
+                    The balance gifts are sent from, plus the bounds a top-up has to fall
+                    inside and the amounts worth offering as one tap.
+
+                    Balance is not a separate currency - it is the platform's own
+                    currency, held on account. It is also spent automatically against any
+                    purchase, which is why a package can settle without a payment.
+                    """,
+            security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponse(responseCode = "200", description = "Balance and top-up bounds")
+    @GetMapping("/credit")
+    public CreditBalanceResponse credit(@AuthenticationPrincipal AuthUser principal) {
+        return billingService.creditBalance(principal.user());
+    }
+
+    @Operation(
+            summary = "Load balance",
+            description = """
+                    Buys balance rather than content. Settles like any other purchase -
+                    the same providers, the same PENDING then COMPLETED - and the balance
+                    appears only once the money has actually cleared.
+
+                    Deliberately the one purchase existing balance is **not** applied to:
+                    paying for balance with balance would settle a top-up for nothing and
+                    hand back what it consumed.
+
+                    Unlike the item purchases, a PENDING top-up is never reused. Somebody
+                    who started at 5 000 and came back for 20 000 meant the second figure.
+                    """,
+            security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponse(responseCode = "200", description = "Pay it the way the `action` says")
+    @ApiResponse(responseCode = "400",
+            description = "`invalid_amount` - outside the bounds - `msisdn_required`, or `unknown_payment_method`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "`topup_disabled`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "`momo_unavailable` or `stripe_unavailable`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/credit/top-up")
+    public CheckoutResponse topUp(@AuthenticationPrincipal AuthUser principal,
+                                  @Valid @RequestBody TopUpRequest request) {
+        return billingService.buyCredit(principal.user(), request.amountMinor(),
+                PaymentChoice.of(request.method(), request.payerMsisdn()));
     }
 
     /** The body is optional, so it may not be there at all. */

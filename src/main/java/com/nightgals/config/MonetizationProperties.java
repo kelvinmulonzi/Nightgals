@@ -69,6 +69,9 @@ public record MonetizationProperties(
 
         Referral referral,
 
+        /** Bounds on loading a balance to send gifts from. */
+        CreditTopUp creditTopUp,
+
         /** What extra live minutes cost, when a broadcast needs to run longer. */
         LiveExtension liveExtension) {
 
@@ -106,6 +109,33 @@ public record MonetizationProperties(
 
         public long ceiling() {
             return maxPriceMinor == null ? Long.MAX_VALUE : maxPriceMinor;
+        }
+    }
+
+    /**
+     * Buying balance up front, which is what makes gifting instant.
+     *
+     * <p>The floor is not arbitrary: every top-up costs a fixed payment fee
+     * whatever its size, so below some amount the platform pays more to collect
+     * the money than the money is worth. The ceiling is the usual defence
+     * against a mistyped extra zero.
+     */
+    public record CreditTopUp(
+            long minMinor,
+            long maxMinor,
+            /** What the top-up screen offers as one-tap amounts. Advisory only. */
+            java.util.List<Long> presetsMinor) {
+
+        public long floor() {
+            return minMinor <= 0 ? 1L : minMinor;
+        }
+
+        public long ceiling() {
+            return maxMinor <= 0 ? Long.MAX_VALUE : maxMinor;
+        }
+
+        public java.util.List<Long> presets() {
+            return presetsMinor == null ? java.util.List.of() : presetsMinor;
         }
     }
 

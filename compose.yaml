@@ -57,6 +57,73 @@ services:
       echo 'bucket nightgals-media ready'
       "
 
+
+  # The actual video, which this application deliberately does not handle.
+  #
+  # Nightgals stores a playbackUrl and decides who may see it; something else has
+  # to serve the stream. Owncast is that something for local work: OBS or a phone
+  # pushes RTMP in, it transcodes to HLS, and the .m3u8 it publishes is what goes
+  # in a session's playbackUrl.
+  #
+  # Self-hosted rather than a hosted API on purpose. It costs nothing per minute,
+  # and no third party's content policy applies to what gets broadcast - which
+  # rules out YouTube and Twitch for this platform whatever their free tier says.
+  #
+  # Admin at http://localhost:8090/admin (admin / abc123). Push RTMP to
+  # rtmp://localhost:1935/live with stream key abc123. Both are Owncast defaults
+  # and both must be changed before this is reachable from anywhere but a laptop.
+  owncast:
+    image: 'owncast/owncast:latest'
+    container_name: nightgals-owncast
+    ports:
+      # 8090 outside, because 8080 is the Spring application's.
+      - '8090:8080'
+      # RTMP ingest - what OBS and mobile broadcast apps push to.
+      - '1935:1935'
+    volumes:
+      - nightgals-owncast:/app/data
+
+  # Going live from the browser, which Owncast above cannot do.
+  #
+  # Owncast ingests RTMP, and no browser can speak RTMP - so with it alone a
+  # creator needs OBS on a desktop before she can broadcast at all. MediaMTX
+  # accepts WHIP, the standard HTTP handshake for pushing WebRTC in, which means
+  # the camera in a phone is enough. It serves the same stream back three ways:
+  #
+  #   WHIP  POST http://localhost:8889/<path>/whip    the camera going in
+  #   WHEP  POST http://localhost:8889/<path>/whep    viewers, sub-second
+  #   HLS   GET  http://localhost:8888/<path>/index.m3u8
+  #
+  # The frontend proxies /stream and /hls to these, so the browser stays
+  # same-origin - which matters because a page served over HTTPS may not POST to
+  # a plain http:// address, and getUserMedia refuses to run outside HTTPS in
+  # the first place.
+  #
+  # RTMP and RTSP are switched off here: Owncast already owns 1935, and this
+  # only has to accept what a browser can send.
+  #
+  # NOT SECURED. A default install lets anyone publish to any path, so the only
+  # thing protecting a broadcast is that the path is a random 24 characters.
+  # Before this is reachable from outside a laptop, turn on publisher
+  # authentication - see https://github.com/bluenviron/mediamtx#authentication
+  mediamtx:
+    image: 'bluenviron/mediamtx:latest'
+    container_name: nightgals-mediamtx
+    # Host networking, because WebRTC needs its ICE candidates to carry an
+    # address the browser can actually reach. Inside a bridge network they carry
+    # the container's, and the connection is negotiated and then goes silent.
+    network_mode: host
+    environment:
+      MTX_RTMP: 'no'
+      MTX_RTSP: 'no'
+      MTX_SRT: 'no'
+      MTX_WEBRTC: 'yes'
+      MTX_WEBRTCADDRESS: ':8889'
+      MTX_HLS: 'yes'
+      MTX_HLSVARIANT: lowLatency
+      MTX_HLSALWAYSREMUX: 'yes'
+
 volumes:
   nightgals-pgdata:
   nightgals-minio:
+  nightgals-owncast:

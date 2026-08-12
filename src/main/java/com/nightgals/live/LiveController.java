@@ -6,11 +6,16 @@ import com.nightgals.billing.BillingService;
 import com.nightgals.billing.dto.CheckoutResponse;
 import com.nightgals.config.MonetizationProperties;
 import com.nightgals.live.dto.ExtendLiveRequest;
+import com.nightgals.live.dto.GiftFeedResponse;
+import com.nightgals.live.dto.GiftOptionResponse;
+import com.nightgals.live.dto.GiftResponse;
 import com.nightgals.live.dto.LiveAllowanceResponse;
 import com.nightgals.live.dto.LiveSessionRequest;
 import com.nightgals.live.dto.LiveSessionResponse;
+import com.nightgals.live.dto.SendGiftRequest;
 import com.nightgals.user.AuthUser;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -20,6 +25,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,6 +38,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -61,6 +68,7 @@ public class LiveController {
     private final LiveSessionService liveSessionService;
     private final LiveQuotaService liveQuotaService;
     private final BillingService billingService;
+    private final GiftService giftService;
     private final MonetizationProperties monetization;
 
     @Operation(summary = "Announce or start a broadcast",
@@ -240,13 +248,94 @@ public class LiveController {
     }
 
     @Operation(summary = "Get the playback URL for a session",
-            description = "Returns 402 when the caller has not unlocked the host, so the client can open the paywall.")
+            description = """
+                    **Public for a FREE broadcast** - a visitor with no account can watch,
+                    which is the entire point of a free one: nobody signs up for a platform
+                    they were not allowed to look at, and nobody sends a gift to a creator
+                    they never got to see.
+
+                    An EXCLUSIVE broadcast still sells entry, and says so differently
+                    depending on who is asking: 401 to a stranger, because signing in is the
+                    first step, and 402 to a member who simply has not bought it, so the
+                    client can open the paywall.
+                    """)
     @ApiResponse(responseCode = "200", description = "The playback URL")
     @ApiResponse(responseCode = "402", description = "Host not unlocked",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @GetMapping("/live/{sessionId}/playback")
     public Map<String, String> playback(@PathVariable UUID sessionId,
                                         @AuthenticationPrincipal AuthUser principal) {
-        return Map.of("playbackUrl", liveSessionService.playbackUrl(sessionId, principal.user()));
+        // userOrNull, not user(): there may be no principal at all here now, and
+        // the entitlement check is what decides whether that is allowed.
+        return Map.of("playbackUrl",
+                liveSessionService.playbackUrl(sessionId, AuthUser.userOrNull(principal)));
+    }
+
+    // ------------------------------------------------------------------ gifts
+
+    @Operation(summary = "What can be sent to a creator on air",
+            description = """
+                    The gift picker. Public, so the options can be shown before sign-in -
+                    it reads configuration and exposes nobody's data.
+
+                    Prices are in the currency's minor unit. `icon` is an emoji, so a
+                    client can render the whole catalogue without fetching any images.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Sendable gifts, cheapest first")
+    @ApiResponse(responseCode = "409", description = "`gifts_disabled` - not available here",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/live/gifts")
+    public List<GiftOptionResponse> giftCatalogue() {
+        return giftService.catalogue();
+    }
+
+    @Operation(summary = "Send a gift to the creator on air",
+            description = """
+                    Spends the sender's balance - no payment happens here, which is what
+                    makes it instant. The money was taken when the balance was topped up
+                    at `POST /api/v1/billing/credit/top-up`.
+
+                    A `409 insufficient_credit` is the cue to open the top-up screen; the
+                    message carries the current balance. The debit, the gift and the
+                    creator's earning are one transaction, so a failure leaves nothing
+                    half-done.
+                    """,
+            security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponse(responseCode = "200", description = "Sent, and now visible on the broadcast")
+    @ApiResponse(responseCode = "400",
+            description = "`unknown_gift` or `self_gift` - a creator cannot gift her own broadcast",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "No such broadcast",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "409",
+            description = "`insufficient_credit`, `not_live`, or `gifts_disabled`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/live/{sessionId}/gifts")
+    public GiftResponse sendGift(@PathVariable UUID sessionId,
+                                 @AuthenticationPrincipal AuthUser principal,
+                                 @Valid @RequestBody SendGiftRequest request) {
+        return giftService.send(principal.user(), sessionId, request.giftCode(), request.message());
+    }
+
+    @Operation(summary = "Gifts sent to a broadcast",
+            description = """
+                    Polled by the viewer's client to animate gifts as they arrive.
+
+                    Omit `since` on the first call and the last 50 gifts come back, so a
+                    viewer joining midway does not face a blank overlay. Then send back the
+                    `until` value from the previous response - it is the server's own
+                    clock, which is what stops gifts being replayed or skipped when the
+                    two machines disagree about the time.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Gifts since `since`, oldest first")
+    @ApiResponse(responseCode = "404", description = "No such broadcast",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/live/{sessionId}/gifts")
+    public GiftFeedResponse gifts(
+            @PathVariable UUID sessionId,
+            @Parameter(description = "The `until` from the last response. Omit on first call.")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant since) {
+        return giftService.feed(sessionId, since);
     }
 }

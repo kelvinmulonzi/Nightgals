@@ -53,6 +53,10 @@ public class SecurityConfig {
             // The payment picker, so a checkout screen can render its options
             // before sign-in. Reads configuration, exposes no account data.
             "/api/v1/billing/payment-methods",
+            // The gift catalogue, for the same reason: somebody deciding whether
+            // to sign up should be able to see what sending one costs. Reads
+            // configuration only - sending one is authenticated, below.
+            "/api/v1/live/gifts",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
@@ -87,6 +91,18 @@ public class SecurityConfig {
                         // The calendar is a shop window too: somebody should be able
                         // to see what is on before deciding to sign up for it.
                         .requestMatchers(HttpMethod.GET, "/api/v1/live/upcoming").permitAll()
+                        // The stream itself, for a FREE broadcast - which is now most of
+                        // them, since live earns through gifts rather than a door charge.
+                        // Without this a visitor is told the host has not started yet
+                        // while she is plainly on air, because the 401 arrives before the
+                        // entitlement check ever runs. LiveSessionService.playbackUrl is
+                        // what actually decides: it still refuses an exclusive session to
+                        // anyone who has not bought it.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/live/*/playback").permitAll()
+                        // The gift feed on that broadcast. Read-only, and it shows public
+                        // handles and amounts - the same things the room shows. Sending
+                        // one is a POST and stays authenticated: it spends a balance.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/live/*/gifts").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/call-rates").permitAll()
                         // Without this the preview URLs above would be dead links.
                         // MediaService still refuses anything past the free preview.

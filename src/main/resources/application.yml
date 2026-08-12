@@ -194,6 +194,18 @@ nightgals:
       # The ceiling that stops a daily top-up from being cheaper than upgrading.
       max-minutes-per-day: ${LIVE_EXTENSION_MAX_MINUTES:120}
 
+    # Buying balance up front, which is what makes gifting instant. A card
+    # redirect per gift would take the sender out of the broadcast and back for
+    # every one, so the money is taken once and spent from the ledger after.
+    credit-top-up:
+      # Every top-up costs the same payment fee whatever its size, so below some
+      # amount collecting the money costs more than the money is worth.
+      min-minor: ${CREDIT_MIN_TOPUP:1000}
+      # Catches a mistyped extra zero.
+      max-minor: ${CREDIT_MAX_TOPUP:500000}
+      # One-tap amounts on the top-up screen. Advisory - any value in range works.
+      presets-minor: [1000, 5000, 10000, 25000]
+
     referral:
       # Paid to the referrer when the referred account buys its FIRST package.
       bonus-minor: 5000
@@ -286,8 +298,14 @@ nightgals:
     # Where Stripe returns the payer. {purchaseId} is substituted. Deep links on
     # mobile. Arriving here proves nothing - the destination must still poll the
     # purchase, because a payer can reach it by pressing back.
-    success-url: ${STRIPE_SUCCESS_URL:${APP_BASE_URL:http://localhost:5173}/checkout/done?purchase={purchaseId}}
-    cancel-url: ${STRIPE_CANCEL_URL:${APP_BASE_URL:http://localhost:5173}/checkout/cancelled?purchase={purchaseId}}
+    # Blank is fine and normal - both are then derived from return-base-url
+    # below. That fallback lives in code rather than in a ${...:default} here
+    # because a default only applies when the variable is ABSENT, and
+    # `STRIPE_SUCCESS_URL=` in an env file is present-and-empty: it beats the
+    # default and leaves the URL empty.
+    success-url: ${STRIPE_SUCCESS_URL:}
+    cancel-url: ${STRIPE_CANCEL_URL:}
+    return-base-url: ${APP_BASE_URL:http://localhost:5173}
     # How long the hosted page stays payable. Stripe permits 30m to 24h and
     # rejects anything else, so this is clamped rather than passed through.
     # Only for accounts with Managed Payments switched on, where Stripe is the
@@ -301,6 +319,11 @@ nightgals:
     # Must exceed session-ttl: a page Stripe still considers payable must not be
     # failed underneath the payer.
     reconcile-window: P1D
+    # Stripe as merchant of record, settling sales tax itself. Off: newer
+    # accounts enable it by default, and it rejects every checkout that does not
+    # classify its line items with a txcd_ tax code. Turning it on means
+    # assigning one to each PurchaseType first.
+    managed-payments: ${STRIPE_MANAGED_PAYMENTS:false}
 
   # Private 1-to-1 video calls.
   calls:
@@ -319,6 +342,40 @@ nightgals:
     reminder-lead-time: PT30M
     # Sweep that sends those reminders.
     reminder-cron: "0 */5 * * * *"
+
+  # What a viewer can send a creator while she is on air. Broadcasts are free to
+  # watch, so this is how a live earns: gifts, not a door charge.
+  #
+  # Configuration rather than a table - a handful of fixed items that change when
+  # the business changes, not data anybody edits at runtime. Prices are in the
+  # currency's minor unit, and the icon is an emoji so a client can render the
+  # whole catalogue without fetching a single image.
+  #
+  # Re-pricing is safe: every gift already sent keeps the amount and label copied
+  # onto its own row, so old receipts and old earnings do not move.
+  gifts:
+    enabled: ${GIFTS_ENABLED:true}
+    catalogue:
+      - code: ROSE
+        label: Rose
+        icon: 🌹
+        price-minor: 500
+      - code: HEART
+        label: Heart
+        icon: ❤️
+        price-minor: 1000
+      - code: CHAMPAGNE
+        label: Champagne
+        icon: 🍾
+        price-minor: 2500
+      - code: DIAMOND
+        label: Diamond
+        icon: 💎
+        price-minor: 10000
+      - code: CROWN
+        label: Crown
+        icon: 👑
+        price-minor: 25000
 
   earnings:
     # The platform's cut of every payment. 30 means creators keep 70%.

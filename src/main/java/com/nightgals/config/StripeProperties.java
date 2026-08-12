@@ -58,6 +58,17 @@ public record StripeProperties(
         String cancelUrl,
 
         /**
+         * What the two above are derived from when they are blank.
+         *
+         * <p>Blank is the normal case, not a misconfiguration: {@code
+         * STRIPE_SUCCESS_URL=} in an env file is present-and-empty, which beats a
+         * {@code ${...:default}} rather than falling back to it. So the fallback
+         * lives in {@link com.nightgals.billing.stripe.StripeGateway} instead, and
+         * this is the base it builds on - normally the app's own URL.
+         */
+        String returnBaseUrl,
+
+        /**
          * How long the hosted page stays payable.
          *
          * <p>Stripe permits 30 minutes to 24 hours and rejects anything outside
@@ -98,5 +109,20 @@ public record StripeProperties(
          * not a default worth inventing. Codes are listed at
          * https://docs.stripe.com/tax/tax-codes
          */
-        String taxCode) {
+        String taxCode,
+
+        /**
+         * Whether Stripe is the merchant of record for these sales.
+         *
+         * <p>Off, and sent as off on every session. Accounts created recently have
+         * Managed Payments on by default, and it rejects any checkout whose line
+         * items are not classified with a {@link #taxCode()} - which is why a card
+         * payment can fail on an account that was never configured for tax at all.
+         * Older accounts do not have the feature and ignore the field, so sending
+         * {@code false} is the one value that behaves the same on both.
+         *
+         * <p>Turning it on means assigning a tax code first, and that is a decision
+         * about what is being sold rather than a default worth inventing here.
+         */
+        boolean managedPayments) {
 }
