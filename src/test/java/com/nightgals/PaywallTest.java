@@ -4,6 +4,7 @@ import com.nightgals.auth.AuthService;
 import com.nightgals.auth.dto.RegisterRequest;
 import com.nightgals.billing.BillingService;
 import com.nightgals.billing.EntitlementService;
+import com.nightgals.billing.PaymentChoice;
 import com.nightgals.billing.PurchaseStatus;
 import com.nightgals.common.ApiException;
 import com.nightgals.discovery.FeedService;
@@ -77,9 +78,9 @@ class PaywallTest {
         // "From X" is the cheapest locked thing, not the first one found.
         assertThat(card.fromPriceMinor()).isEqualTo(3_000L);
 
-        assertThat(feedService.feed(viewer, "nairobi", null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, "nairobi", null, null, null, PageRequest.of(0, 50)).content())
                 .anySatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
-        assertThat(feedService.feed(viewer, "Kisumu", null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, "Kisumu", null, null, null, PageRequest.of(0, 50)).content())
                 .noneSatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
     }
 
@@ -87,7 +88,7 @@ class PaywallTest {
     @DisplayName("The feed never shows the caller their own card")
     void feedExcludesSelf() {
         User viewer = approvedCreator();
-        assertThat(feedService.feed(viewer, null, null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, null, null, null, null, PageRequest.of(0, 50)).content())
                 .noneSatisfy(c -> assertThat(c.userId()).isEqualTo(viewer.getId()));
     }
 
@@ -118,7 +119,7 @@ class PaywallTest {
         User viewer = viewer();   // registered, never did KYC
 
         assertThat(profileService.getPublic(creator.getId(), viewer).username()).isNotBlank();
-        assertThat(feedService.feed(viewer, null, null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, null, null, null, null, PageRequest.of(0, 50)).content())
                 .anySatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
 
         buy(viewer, item);
@@ -370,6 +371,120 @@ class PaywallTest {
                 .hasMessageContaining("Say why");
     }
 
+    // ------------------------------------------------- the whole gallery at once
+
+    @Test
+    @DisplayName("The bundle is priced at the sum of the items, with no discount")
+    void bundleIsTheSumOfItsItems() {
+        User creator = approvedCreator();
+        publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        publish(creator, ContentTier.EXCLUSIVE, 5_000L);
+        User viewer = viewer();
+
+        var quote = billingService.quoteUnlockAll(viewer, creator.getId());
+
+        assertThat(quote.itemCount()).isEqualTo(2);
+        assertThat(quote.totalMinor()).isEqualTo(8_000L);
+    }
+
+    @Test
+    @DisplayName("Free items are not in the bundle - there is nothing to sell")
+    void bundleSkipsFreeItems() {
+        User creator = freshCreator();
+        // The first photo is forced FREE as the profile picture.
+        publish(creator, ContentTier.FREE, null);
+        publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+
+        var quote = billingService.quoteUnlockAll(viewer(), creator.getId());
+
+        assertThat(quote.itemCount()).isEqualTo(1);
+        assertThat(quote.totalMinor()).isEqualTo(3_000L);
+    }
+
+    @Test
+    @DisplayName("Buying the bundle opens every item in it")
+    void bundleOpensEverything() {
+        User creator = approvedCreator();
+        UUID first = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        UUID second = publish(creator, ContentTier.EXCLUSIVE, 5_000L);
+        User viewer = viewer();
+
+        var checkout = billingService.unlockAll(viewer, creator.getId(), PaymentChoice.none());
+        assertThat(checkout.purchase().amountMinor()).isEqualTo(8_000L);
+        billingService.settle(checkout.purchase().id(), null);
+
+        User settled = reload(viewer);
+        assertThat(entitlementService.canView(settled, asset(first))).isTrue();
+        assertThat(entitlementService.canView(settled, asset(second))).isTrue();
+    }
+
+    @Test
+    @DisplayName("Anything posted after the bundle is bought separately")
+    void laterUploadsAreNotIncluded() {
+        User creator = approvedCreator();
+        publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
+
+        var checkout = billingService.unlockAll(viewer, creator.getId(), PaymentChoice.none());
+        // Posted between checkout and settlement - the buyer paid for one item
+        // and must get one item, however tempting it is to be generous with
+        // somebody else's work.
+        UUID later = publish(reload(creator), ContentTier.EXCLUSIVE, 4_000L);
+        billingService.settle(checkout.purchase().id(), null);
+
+        User settled = reload(viewer);
+        assertThat(entitlementService.canView(settled, asset(later))).isFalse();
+
+        // And it is what a second bundle would now sell them: the top-up.
+        var next = billingService.quoteUnlockAll(settled, creator.getId());
+        assertThat(next.itemCount()).isEqualTo(1);
+        assertThat(next.totalMinor()).isEqualTo(4_000L);
+    }
+
+    @Test
+    @DisplayName("The bundle is priced on what the buyer does not already own")
+    void bundleExcludesWhatIsAlreadyOwned() {
+        User creator = approvedCreator();
+        UUID first = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        publish(creator, ContentTier.EXCLUSIVE, 5_000L);
+        User viewer = viewer();
+        buy(viewer, first);
+
+        var quote = billingService.quoteUnlockAll(reload(viewer), creator.getId());
+
+        // Charging for the clip they bought this morning is the fastest way to
+        // teach somebody never to press the button again.
+        assertThat(quote.itemCount()).isEqualTo(1);
+        assertThat(quote.totalMinor()).isEqualTo(5_000L);
+    }
+
+    @Test
+    @DisplayName("Owning everything already leaves nothing to sell")
+    void nothingLeftToUnlock() {
+        User creator = approvedCreator();
+        UUID only = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
+        buy(viewer, only);
+
+        assertThatThrownBy(() ->
+                billingService.unlockAll(reload(viewer), creator.getId(), PaymentChoice.none()))
+                .hasMessageContaining("already have everything");
+    }
+
+    @Test
+    @DisplayName("Settling the bundle twice does not open anything twice")
+    void bundleSettlementIsIdempotent() {
+        User creator = approvedCreator();
+        UUID item = publish(creator, ContentTier.EXCLUSIVE, 3_000L);
+        User viewer = viewer();
+
+        var checkout = billingService.unlockAll(viewer, creator.getId(), PaymentChoice.none());
+        billingService.settle(checkout.purchase().id(), "REF");
+        billingService.settle(checkout.purchase().id(), "REF");
+
+        assertThat(entitlementService.canView(reload(viewer), asset(item))).isTrue();
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void buy(User viewer, UUID mediaId) {
@@ -388,7 +503,7 @@ class PaywallTest {
     }
 
     private MemberCardResponse cardFor(User viewer, User creator) {
-        return feedService.feed(viewer, null, null, null, PageRequest.of(0, 50)).content().stream()
+        return feedService.feed(viewer, null, null, null, null, PageRequest.of(0, 50)).content().stream()
                 .filter(c -> c.userId().equals(creator.getId()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("creator missing from the feed"));

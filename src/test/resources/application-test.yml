@@ -108,6 +108,11 @@ nightgals:
     min-notice: PT30M
 
   live:
+    # Pinned for the same reason as the payment providers above: application.yml
+    # reads this from .env, so without it the suite would run on whatever the
+    # developer has configured - and on a machine set up for LiveKit it would
+    # mint tokens against a real project. StreamProviderTest overrides it.
+    provider: manual
     reminder-lead-time: PT30M
     reminder-cron: "0 0 4 * * *"
 

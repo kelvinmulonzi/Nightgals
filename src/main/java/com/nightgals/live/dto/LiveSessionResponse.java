@@ -17,7 +17,10 @@ public record LiveSessionResponse(
         String title,
         LiveStatus status,
 
-        @Schema(description = "FREE is open to everyone; EXCLUSIVE is sold per broadcast")
+        @Schema(description = """
+                Always `EXCLUSIVE` - entry is sold per broadcast. `FREE` appears only on
+                sessions that ran before broadcasts became paid.
+                """)
         com.nightgals.media.ContentTier tier,
 
         @Schema(description = """
@@ -28,8 +31,10 @@ public record LiveSessionResponse(
         @Schema(description = "True when the caller must pay to get the playback URL")
         boolean locked,
 
-        @Schema(description = "What this broadcast costs, in minor units. Null when it is free.",
-                example = "5000")
+        @Schema(description = """
+                What it costs to get into this broadcast, in minor units. Null only on a
+                session that ran back when broadcasts could be free.
+                """, example = "5000")
         Long priceMinor,
         @Schema(example = "5000") String priceDisplay,
 
@@ -54,7 +59,8 @@ public record LiveSessionResponse(
                 session.getTitle(),
                 session.getStatus(),
                 session.getTier(),
-                // A free broadcast hands out its URL to anybody.
+                // Only somebody who has paid gets the URL. `isFree` still counts
+                // here for the sessions that ran before the door charge existed.
                 open ? session.getPlaybackUrl() : null,
                 !open,
                 priceMinor,

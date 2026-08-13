@@ -7,12 +7,15 @@ import com.nightgals.billing.dto.CheckoutResponse;
 import com.nightgals.config.MonetizationProperties;
 import com.nightgals.live.dto.ExtendLiveRequest;
 import com.nightgals.live.dto.GiftFeedResponse;
+import com.nightgals.live.dto.GiftHistoryResponse;
+import com.nightgals.live.dto.GiftTotalsResponse;
 import com.nightgals.live.dto.GiftOptionResponse;
 import com.nightgals.live.dto.GiftResponse;
 import com.nightgals.live.dto.LiveAllowanceResponse;
 import com.nightgals.live.dto.LiveSessionRequest;
 import com.nightgals.live.dto.LiveSessionResponse;
 import com.nightgals.live.dto.SendGiftRequest;
+import com.nightgals.live.dto.StreamCredentialsResponse;
 import com.nightgals.user.AuthUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -52,13 +55,16 @@ import java.util.UUID;
 
         Broadcasting requires `APPROVED`.
 
-        Each session is either **FREE** - anyone can watch, signed in or not, which is
-        useful for pulling people in - or **EXCLUSIVE**, which needs a viewer who has
-        unlocked that creator or holds a subscription. Same `tier` as photos and video,
-        set with the session.
+        **Every session is paid to join.** It is created `EXCLUSIVE` and carries a price
+        the host sets herself; `accessPriceMinor` is required, there is no free tier, and
+        no default is invented for a creator who did not name one.
 
-        An exclusive session appears in the public listing with `locked: true` and no
-        `playbackUrl`, so people can see it is happening and know what they are missing.
+        Entry is bought per broadcast, so unlocking a creator's gallery is not a ticket to
+        her room and one show is not a ticket to the next. Gifts sit on top of the door
+        charge rather than replacing it.
+
+        Every session therefore appears in the public listing with `locked: true` and no
+        `playbackUrl`, so people can see it is happening and what it costs to come in.
         """)
 @RestController
 @RequestMapping("/api/v1")
@@ -249,15 +255,14 @@ public class LiveController {
 
     @Operation(summary = "Get the playback URL for a session",
             description = """
-                    **Public for a FREE broadcast** - a visitor with no account can watch,
-                    which is the entire point of a free one: nobody signs up for a platform
-                    they were not allowed to look at, and nobody sends a gift to a creator
-                    they never got to see.
-
-                    An EXCLUSIVE broadcast still sells entry, and says so differently
-                    depending on who is asking: 401 to a stranger, because signing in is the
-                    first step, and 402 to a member who simply has not bought it, so the
+                    Every broadcast sells entry, and it says so differently depending on who
+                    is asking: **401** to a stranger, because getting an account is the first
+                    step and an auth error is not a thing to show somebody who only wanted to
+                    watch, and **402** to a member who simply has not bought this one, so the
                     client can open the paywall.
+
+                    The endpoint is unauthenticated so that the 401 comes from here, with a
+                    sentence a viewer can act on, rather than from the security filter.
                     """)
     @ApiResponse(responseCode = "200", description = "The playback URL")
     @ApiResponse(responseCode = "402", description = "Host not unlocked",
@@ -269,6 +274,62 @@ public class LiveController {
         // the entitlement check is what decides whether that is allowed.
         return Map.of("playbackUrl",
                 liveSessionService.playbackUrl(sessionId, AuthUser.userOrNull(principal)));
+    }
+
+    @Operation(summary = "How to watch a session",
+            description = """
+                    What replaces `/playback`. That endpoint answers with a URL, which only
+                    a provider serving HLS actually has - on a room-based provider there is
+                    no URL to give and it fails. This one asks the configured provider what
+                    a viewer's client needs, so read `mode` and act on it:
+
+                    - `WEBRTC` - connect to `url` with `token` and join `room`
+                    - `HLS` - play `url`
+
+                    **Credentials are minted per request, after the access check, and
+                    expire.** That is the point of the change: a stored URL, once handed
+                    out, is a password nobody can take back.
+
+                    Access is decided exactly as it is for `/playback`: 401 to a stranger,
+                    402 to a member who has not paid for this broadcast.
+                    """)
+    @ApiResponse(responseCode = "200", description = "How to connect, for this viewer, for now")
+    @ApiResponse(responseCode = "402", description = "Host not unlocked",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/live/{sessionId}/watch")
+    public StreamCredentialsResponse watch(@PathVariable UUID sessionId,
+                                           @AuthenticationPrincipal AuthUser principal) {
+        // userOrNull, not user(): an anonymous caller must reach the service and
+        // be turned away by the entitlement check, which answers 401 with a
+        // sentence about creating an account. Demanding a principal here would
+        // hand them the security filter's words instead.
+        return StreamCredentialsResponse.of(
+                liveSessionService.watch(sessionId, AuthUser.userOrNull(principal)));
+    }
+
+    @Operation(summary = "How to broadcast a session",
+            description = """
+                    The host's side of `/watch`, and the reason a creator no longer copies a
+                    stream key anywhere: on a provider that provisions its own ingest this
+                    returns a publisher token, and the browser publishes camera and
+                    microphone straight into the room.
+
+                    Separate from creating the session, and re-issued on demand, because
+                    these expire - a creator who scheduled a broadcast for tomorrow asks
+                    again when she actually goes on air.
+
+                    Restricted to the session's host and to co-hosts who have accepted an
+                    invitation and are on air. Publishing credentials **are** the broadcast:
+                    anyone holding them can appear on it.
+                    """)
+    @ApiResponse(responseCode = "200", description = "How to publish, for this host, for now")
+    @ApiResponse(responseCode = "403", description = "`not_your_session`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/me/live/{sessionId}/publish")
+    public StreamCredentialsResponse publish(@AuthenticationPrincipal AuthUser principal,
+                                             @PathVariable UUID sessionId) {
+        return StreamCredentialsResponse.of(
+                liveSessionService.publish(sessionId, principal.user()));
     }
 
     // ------------------------------------------------------------------ gifts
@@ -337,5 +398,51 @@ public class LiveController {
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant since) {
         return giftService.feed(sessionId, since);
+    }
+
+    // -------------------------------------------------- gifts, after the fact
+
+    @Operation(
+            summary = "What I have gifted and been gifted",
+            description = """
+                    Totals for the signed-in account, in both directions, all time.
+
+                    `sentMinor` is money spent and gone. `receivedMinor` is **gross** - what
+                    viewers paid before the platform's commission - so it is a headline
+                    figure, not a balance. What a creator can actually withdraw is on
+                    `GET /me/earnings`, and the two should never be shown as the same thing.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Gift totals for this account")
+    @GetMapping("/me/gifts")
+    public GiftTotalsResponse giftTotals(@AuthenticationPrincipal AuthUser principal) {
+        return giftService.totalsFor(principal.id());
+    }
+
+    @Operation(
+            summary = "Every gift I have sent",
+            description = """
+                    Newest first, each naming the creator and the broadcast it was sent in.
+
+                    The room's feed is ephemeral - it empties when the broadcast ends - so
+                    this is where somebody comes to see where their balance actually went.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Gifts sent, newest first")
+    @GetMapping("/me/gifts/sent")
+    public PageResponse<GiftHistoryResponse> giftsSent(@AuthenticationPrincipal AuthUser principal,
+                                                       @PageableDefault(size = 20) Pageable pageable) {
+        return giftService.sentBy(principal.id(), pageable);
+    }
+
+    @Operation(
+            summary = "Every gift I have received",
+            description = """
+                    For a creator: who sent what, in which broadcast, and what they said with
+                    it. Amounts are gross - her share of each is on her earnings ledger.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Gifts received, newest first")
+    @GetMapping("/me/gifts/received")
+    public PageResponse<GiftHistoryResponse> giftsReceived(@AuthenticationPrincipal AuthUser principal,
+                                                           @PageableDefault(size = 20) Pageable pageable) {
+        return giftService.receivedBy(principal.id(), pageable);
     }
 }

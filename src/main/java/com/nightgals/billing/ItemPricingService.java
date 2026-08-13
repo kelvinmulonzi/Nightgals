@@ -83,6 +83,25 @@ public class ItemPricingService {
         return priceMinor;
     }
 
+    /**
+     * The same bounds, for something that must carry a price of its own.
+     *
+     * <p>Broadcasts are sold at the door, so "leave it blank and the platform
+     * default applies" is not good enough for one: the creator would find out
+     * what her show cost from her earnings report. The floor in {@link #validate}
+     * does the rest of the work - it is above zero, so free cannot be smuggled
+     * in as a price of nothing.
+     *
+     * @param priceMinor the requested price; null is the error this exists to catch
+     */
+    public long require(Long priceMinor) {
+        if (priceMinor == null) {
+            throw ApiException.badRequest("price_required",
+                    "Set what viewers pay to join this broadcast.");
+        }
+        return validate(priceMinor);
+    }
+
     /** How long a bought item stays open. Null means it never expires. */
     public java.time.Duration accessDuration() {
         return properties.itemPricing().accessDuration();

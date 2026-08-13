@@ -67,28 +67,42 @@ class GiftTest {
     @Autowired UserRepository userRepository;
     @Autowired EarningRepository earningRepository;
 
-    // ------------------------------------------------------- live is public
+    // ------------------------------------------------------- live is ticketed
 
     @Test
-    @DisplayName("A broadcast created without a tier is free to watch")
-    void broadcastsAreFreeByDefault() {
+    @DisplayName("Every broadcast is ticketed at the price its host set")
+    void broadcastsAreTicketed() {
         User creator = approvedCreator();
 
         var session = liveSessionService.create(creator, new LiveSessionRequest(
-                "Friday set", "https://stream.example.com/a", null, null, null, null));
+                "Friday set", "https://stream.example.com/a", null, null, null, 3_000L));
 
-        assertThat(session.tier()).isEqualTo(com.nightgals.media.ContentTier.FREE);
+        assertThat(session.tier()).isEqualTo(com.nightgals.media.ContentTier.EXCLUSIVE);
+        assertThat(session.priceMinor()).isEqualTo(3_000L);
     }
 
     @Test
-    @DisplayName("Buying entry to a free broadcast is refused - there is nothing to sell")
-    void freeBroadcastsCannotBeBought() {
+    @DisplayName("A broadcast with no price is refused rather than given a default")
+    void aPriceIsRequired() {
         User creator = approvedCreator();
-        UUID sessionId = liveSession(creator);
 
-        assertThatThrownBy(() ->
-                billingService.buyLiveAccess(viewer(), sessionId, PaymentChoice.none()))
-                .hasMessageContaining("open to everyone");
+        // The alternative is worse than an error: she announces a show, viewers
+        // are charged the platform's number, and the first she hears of it is her
+        // earnings report.
+        assertThatThrownBy(() -> liveSessionService.create(creator, new LiveSessionRequest(
+                "Friday set", "https://stream.example.com/a", null, null, null, null)))
+                .hasMessageContaining("Set what viewers pay");
+    }
+
+    @Test
+    @DisplayName("Asking for a free broadcast is refused, not quietly charged")
+    void freeBroadcastsCannotBeCreated() {
+        User creator = approvedCreator();
+
+        assertThatThrownBy(() -> liveSessionService.create(creator, new LiveSessionRequest(
+                "Friday set", null, null, null,
+                com.nightgals.media.ContentTier.FREE, 3_000L)))
+                .hasMessageContaining("paid to join");
     }
 
     // ------------------------------------------------------------- top-ups
@@ -302,9 +316,11 @@ class GiftTest {
 
     /** A broadcast that is on air, since gifts are refused to anything else. */
     private UUID liveSession(User creator) {
-        // Null scheduledFor means "start now", which is what puts it LIVE.
+        // Null scheduledFor means "start now", which is what puts it LIVE. The
+        // price is required on every broadcast now; gifts are what a viewer
+        // spends once inside, on top of what they paid at the door.
         return liveSessionService.create(reload(creator), new LiveSessionRequest(
-                "Friday set", "https://stream.example.com/a", null, null, null, null)).id();
+                "Friday set", "https://stream.example.com/a", null, null, null, 3_000L)).id();
     }
 
     private User reload(User user) {

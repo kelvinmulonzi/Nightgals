@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -67,6 +68,21 @@ public class BillingService {
     private final com.nightgals.live.LiveQuotaService liveQuotaService;
     private final EmailService emailService;
     private final MonetizationProperties properties;
+
+    /**
+     * Providers that can be asked directly what happened to a payment.
+     *
+     * <p>A list, and possibly empty: which ones exist depends on what is
+     * configured, and a deployment taking money by hand has none. Injected as a
+     * collection rather than a named bean so this class does not have to know
+     * about any particular provider - and lazily, because a reconciler needs
+     * this service to do the settling and would otherwise close the circle.
+     */
+    private final org.springframework.beans.factory.ObjectProvider<PurchaseReconciler> reconcilerBeans;
+
+    private java.util.List<PurchaseReconciler> reconcilers() {
+        return reconcilerBeans.stream().toList();
+    }
 
     // ---------------------------------------------------------------- buying
 
@@ -113,6 +129,139 @@ public class BillingService {
                         .build()));
 
         return checkout(buyer, purchase, provider, choice);
+    }
+
+    /**
+     * One purchase, brought up to date with the provider before it is answered.
+     *
+     * <p>This is what the confirmation screen polls, and the reconciliation is
+     * the point of it. A card payment is already paid by the time the browser
+     * comes back, but the platform does not know until a webhook arrives - and
+     * on a deployment with no reachable webhook endpoint that is the scheduled
+     * sweep, up to two minutes later. Two minutes of spinner after handing over
+     * a card reads as a payment that failed, and the next thing that happens is
+     * somebody pays twice.
+     *
+     * <p>Asking the provider directly turns that into one round trip. The
+     * webhook and the sweep both still run; they are the backstop for a payer
+     * who closed the tab, rather than the only way anything settles.
+     */
+    @Transactional
+    public PurchaseResponse purchase(UUID userId, UUID purchaseId) {
+        Purchase purchase = purchaseRepository.findById(purchaseId)
+                .orElseThrow(() -> ApiException.notFound("Purchase"));
+        if (!purchase.getUser().getId().equals(userId)) {
+            // Not found rather than forbidden: whether somebody else's purchase
+            // id exists is not this caller's business.
+            throw ApiException.notFound("Purchase");
+        }
+
+        if (purchase.getStatus() == PurchaseStatus.PENDING) {
+            reconcilers().stream()
+                    .filter(r -> r.handles(purchase))
+                    .findFirst()
+                    .ifPresent(r -> {
+                        try {
+                            r.reconcileNow(purchase);
+                        } catch (RuntimeException e) {
+                            // The provider is unreachable or slow. Answer with
+                            // what is on record - the poll will come round again,
+                            // and reporting a failure here would be inventing one.
+                            log.warn("Could not reconcile purchase {} on demand: {}",
+                                    purchaseId, e.toString());
+                        }
+                    });
+        }
+        return PurchaseResponse.of(purchase);
+    }
+
+    /**
+     * Everything this creator has locked right now, and what the lot costs.
+     *
+     * <p>The same method the purchase itself uses, so the figure on the profile
+     * is the figure charged - a quote computed one way and a price computed
+     * another is how somebody ends up paying a number they never saw.
+     *
+     * <p>Scoped to what this buyer does not already own. Somebody who bought two
+     * clips is quoted for the rest, and somebody returning after the creator
+     * posted more is quoted for the new ones alone.
+     */
+    @Transactional(readOnly = true)
+    public UnlockAllQuote quoteUnlockAll(User buyer, UUID creatorId) {
+        List<MediaAsset> items = lockedItemsFor(buyer, creatorId);
+        long total = items.stream().mapToLong(pricing::priceOf).sum();
+        long photos = items.stream()
+                .filter(m -> m.getType() == com.nightgals.media.MediaType.PHOTO)
+                .count();
+        return new UnlockAllQuote(
+                items.size(),
+                (int) photos,
+                items.size() - (int) photos,
+                total,
+                pricing.display(total),
+                properties.currency());
+    }
+
+    /**
+     * Buys every locked item this creator has posted so far, in one payment.
+     *
+     * <p>Deliberately not a subscription and not a claim on the profile: the ids
+     * are pinned to the purchase, so what she posts tomorrow is hers to sell
+     * again. See {@link PurchaseType#PROFILE_UNLOCK}.
+     */
+    @Transactional
+    public CheckoutResponse unlockAll(User buyer, UUID creatorId, PaymentChoice choice) {
+        requireMonetisationOn();
+
+        if (buyer.getId().equals(creatorId)) {
+            throw ApiException.badRequest("self_purchase", "This is already yours");
+        }
+        User creator = userRepository.findById(creatorId)
+                .orElseThrow(() -> ApiException.notFound("Member"));
+
+        List<MediaAsset> items = lockedItemsFor(buyer, creatorId);
+        if (items.isEmpty()) {
+            throw ApiException.conflict("nothing_to_unlock",
+                    "You already have everything this creator has posted.");
+        }
+
+        PaymentProvider provider = paymentProviders.resolve(choice.method());
+        long total = items.stream().mapToLong(pricing::priceOf).sum();
+
+        // Not reusing a PENDING bundle the way a single item does. The contents
+        // are a snapshot: one started before the creator posted three more clips
+        // is for a different set of things, and charging yesterday's total for
+        // today's gallery would be wrong in whichever direction it landed.
+        Purchase purchase = purchaseRepository.save(Purchase.builder()
+                .user(buyer)
+                .type(PurchaseType.PROFILE_UNLOCK)
+                .targetUser(creator)
+                .bundleMediaIds(items.stream().map(MediaAsset::getId)
+                        .collect(java.util.stream.Collectors.toCollection(java.util.HashSet::new)))
+                .amountMinor(total)
+                .currency(properties.currency())
+                .status(PurchaseStatus.PENDING)
+                .provider(provider.name())
+                .build());
+
+        return checkout(buyer, purchase, provider, choice);
+    }
+
+    /** This creator's approved, paid items that the buyer cannot already see. */
+    private List<MediaAsset> lockedItemsFor(User buyer, UUID creatorId) {
+        List<MediaAsset> approved = mediaRepository
+                .findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(creatorId, MediaStatus.APPROVED)
+                .stream()
+                .filter(m -> !m.isFree())
+                .toList();
+        if (approved.isEmpty()) {
+            return List.of();
+        }
+        // One query for the whole gallery, and the same entitlement check the
+        // gallery itself uses - so the bundle covers exactly the tiles a viewer
+        // sees blurred, no more and no less.
+        var viewable = entitlementService.viewableAmong(buyer, approved);
+        return approved.stream().filter(m -> !viewable.contains(m.getId())).toList();
     }
 
     /**
@@ -483,7 +632,23 @@ public class BillingService {
                     purchase.getUser(),
                     purchase.getExtensionDate(),
                     purchase.getExtensionMinutes());
-            case PROFILE_UNLOCK, SUBSCRIPTION -> log.warn(
+            // The bundle. Grants the same rows a per-item sale does and pays the
+            // creator the same way, so nothing downstream needs to know that
+            // four items arrived on one payment instead of four.
+            case PROFILE_UNLOCK -> {
+                if (purchase.getTargetUser() == null) {
+                    // A row from before the bundle was reinstated, when this type
+                    // meant a standing claim on a profile. Nothing to open.
+                    log.warn("Purchase {} is a legacy PROFILE_UNLOCK with no target; nothing granted",
+                            purchase.getId());
+                } else {
+                    int opened = grantBundle(purchase);
+                    earningsService.recordItemEarning(purchase, purchase.getTargetUser());
+                    notifyItemSold(purchase, purchase.getTargetUser(),
+                            opened + (opened == 1 ? " item" : " items"));
+                }
+            }
+            case SUBSCRIPTION -> log.warn(
                     "Purchase {} is a retired type ({}); nothing granted",
                     purchase.getId(), purchase.getType());
         }
@@ -523,6 +688,48 @@ public class BillingService {
                 .source(UnlockSource.PURCHASE)
                 .purchase(purchase)
                 .build());
+    }
+
+    /**
+     * Opens every item the bundle was sold with.
+     *
+     * <p>Works from the ids pinned to the purchase, never from the creator's
+     * gallery as it stands now — settlement can be minutes after checkout on
+     * mobile money, and the buyer is owed what they paid for rather than
+     * whatever happens to be posted when the money lands.
+     *
+     * <p>Items already owned are skipped and items since deleted are ignored,
+     * both without failing: a webhook that fires twice must not write two rows,
+     * and a creator deleting one clip must not block access to the other three.
+     *
+     * @return how many were opened by this call
+     */
+    private int grantBundle(Purchase purchase) {
+        UUID viewerId = purchase.getUser().getId();
+        int opened = 0;
+
+        for (UUID mediaId : purchase.getBundleMediaIds()) {
+            if (mediaUnlockRepository.existsByViewerIdAndMediaId(viewerId, mediaId)) {
+                continue;
+            }
+            var asset = mediaRepository.findById(mediaId).orElse(null);
+            if (asset == null) {
+                log.warn("Purchase {} covers media {} which no longer exists; skipped",
+                        purchase.getId(), mediaId);
+                continue;
+            }
+            mediaUnlockRepository.save(MediaUnlock.builder()
+                    .viewer(purchase.getUser())
+                    .media(asset)
+                    .source(UnlockSource.PURCHASE)
+                    .purchase(purchase)
+                    .build());
+            opened++;
+        }
+
+        log.info("Purchase {} opened {} of {} bundled items",
+                purchase.getId(), opened, purchase.getBundleMediaIds().size());
+        return opened;
     }
 
     private void grantLiveAccess(Purchase purchase) {

@@ -63,7 +63,9 @@ public class FeedController {
             @RequestParam(required = false) @Min(18) @Max(120) Integer minAge,
             @Parameter(description = "Oldest age to include, inclusive", example = "35")
             @RequestParam(required = false) @Min(18) @Max(120) Integer maxAge,
+            @Parameter(description = "Only members broadcasting right now")
+            @RequestParam(required = false) Boolean liveOnly,
             @PageableDefault(size = 20) Pageable pageable) {
-        return feedService.feed(AuthUser.userOrNull(principal), city, minAge, maxAge, pageable);
+        return feedService.feed(AuthUser.userOrNull(principal), city, minAge, maxAge, liveOnly, pageable);
     }
 }

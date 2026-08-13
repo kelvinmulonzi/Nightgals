@@ -87,18 +87,28 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/members").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/profile").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/media").permitAll()
+                        // What the whole gallery costs. A price is the shop window's
+                        // job, and a visitor weighing up an account should see it
+                        // before signing up rather than after. GET only - the POST on
+                        // the same path spends money and stays authenticated.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/billing/members/*/unlock-all").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/live").permitAll()
                         // The calendar is a shop window too: somebody should be able
                         // to see what is on before deciding to sign up for it.
                         .requestMatchers(HttpMethod.GET, "/api/v1/live/upcoming").permitAll()
-                        // The stream itself, for a FREE broadcast - which is now most of
-                        // them, since live earns through gifts rather than a door charge.
-                        // Without this a visitor is told the host has not started yet
-                        // while she is plainly on air, because the 401 arrives before the
-                        // entitlement check ever runs. LiveSessionService.playbackUrl is
-                        // what actually decides: it still refuses an exclusive session to
-                        // anyone who has not bought it.
+                        // Open, but not unguarded. Every broadcast is paid to join now,
+                        // so nothing here gives a stranger a stream: what it gives them
+                        // is LiveSessionService's own 401, which says to create an
+                        // account. Behind the filter the answer would come from Spring
+                        // instead - "send Authorization: Bearer <token>" - which is a
+                        // message for whoever wrote the client, shown to somebody who
+                        // just wanted to watch.
                         .requestMatchers(HttpMethod.GET, "/api/v1/live/*/playback").permitAll()
+                        // /watch is the same door, for a provider that hands out a token
+                        // rather than a URL, so it is open on the same terms and refused
+                        // by the same entitlement check. Publishing credentials live
+                        // under /me and stay authenticated.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/live/*/watch").permitAll()
                         // The gift feed on that broadcast. Read-only, and it shows public
                         // handles and amounts - the same things the room shows. Sending
                         // one is a POST and stays authenticated: it spends a balance.

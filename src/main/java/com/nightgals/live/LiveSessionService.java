@@ -51,6 +51,7 @@ public class LiveSessionService {
     private final EntitlementService entitlementService;
     private final LiveQuotaService quotaService;
     private final ItemPricingService pricing;
+    private final StreamProvider streamProvider;
 
     // ---------------------------------------------------------------- creating
 
@@ -83,26 +84,38 @@ public class LiveSessionService {
         }
         quotaService.requireDurationFits(host, request.durationMinutes());
 
-        // Free unless she asks otherwise. Broadcasts earn through gifts sent while
-        // they run rather than a door charge, and a paywall in front of the stream
-        // works against that: nobody gifts a creator they never got to watch.
-        var tier = request.tier() == null
-                ? com.nightgals.media.ContentTier.FREE : request.tier();
+        // Every broadcast is sold at the door, and the price is named here rather
+        // than defaulted: a creator who is never asked finds out what her show
+        // cost from her earnings report. Asking for a free one is refused instead
+        // of quietly charged - she would be telling her followers one thing while
+        // the room told them another.
+        if (request.tier() == com.nightgals.media.ContentTier.FREE) {
+            throw ApiException.badRequest("free_live_not_allowed",
+                    "Broadcasts are paid to join. Set a price for this one.");
+        }
+        long accessPrice = pricing.require(request.accessPriceMinor());
 
         LiveSession session = sessionRepository.save(LiveSession.builder()
                 .host(host)
                 .title(request.title().trim())
-                .playbackUrl(request.playbackUrl())
                 .scheduledFor(request.scheduledFor())
                 .durationMinutes(request.durationMinutes())
-                .tier(tier)
-                // A free broadcast is never priced; an exclusive one falls back to
-                // the platform default until she names her own.
-                .accessPriceMinor(tier == com.nightgals.media.ContentTier.FREE
-                        ? null : pricing.validate(request.accessPriceMinor()))
+                .tier(com.nightgals.media.ContentTier.EXCLUSIVE)
+                .accessPriceMinor(accessPrice)
                 .status(startingNow ? LiveStatus.LIVE : LiveStatus.SCHEDULED)
                 .startedAt(startingNow ? Instant.now() : null)
                 .build());
+
+        // Where the video will actually go. After the save, because a provider
+        // that names a room after the session needs the id to exist first; the
+        // enclosing transaction means the row is never visible without it.
+        //
+        // A provider that provisions its own ingest discards whatever the host
+        // supplied - with LiveKit there is no URL she could have known, and
+        // honouring a client-supplied one would let one session be pointed at
+        // another's stream.
+        session.setPlaybackUrl(
+                streamProvider.provision(session, request.playbackUrl()).playbackUrl());
 
         // The owner goes on the roster immediately, so it is complete from the
         // start rather than empty until somebody invites a co-host.
@@ -127,21 +140,29 @@ public class LiveSessionService {
         quotaService.requireDurationFits(host, request.durationMinutes());
 
         session.setTitle(request.title().trim());
-        session.setPlaybackUrl(request.playbackUrl());
+        // Through the provider, not straight from the request. On a provisioning
+        // provider this leaves the room alone; letting an edit overwrite it would
+        // repoint a live broadcast at an arbitrary URL.
+        session.setPlaybackUrl(
+                streamProvider.provision(session, request.playbackUrl()).playbackUrl());
         if (request.scheduledFor() != null) {
             session.setScheduledFor(request.scheduledFor());
             // Moving a broadcast means its followers have to be told again.
             session.setReminderSentAt(null);
         }
         session.setDurationMinutes(request.durationMinutes());
-        if (request.tier() != null) {
-            session.setTier(request.tier());
+        if (request.tier() == com.nightgals.media.ContentTier.FREE) {
+            throw ApiException.badRequest("free_live_not_allowed",
+                    "Broadcasts are paid to join. Set a price for this one.");
         }
-        if (session.isFree()) {
-            session.setAccessPriceMinor(null);
-        } else if (request.accessPriceMinor() != null) {
-            session.setAccessPriceMinor(pricing.validate(request.accessPriceMinor()));
-        }
+        // An edit cannot open the door either, and it cannot leave the price
+        // unset: a session carried over from when broadcasts were free arrives
+        // here with none, and this is where it gets one.
+        session.setTier(com.nightgals.media.ContentTier.EXCLUSIVE);
+        session.setAccessPriceMinor(pricing.require(
+                request.accessPriceMinor() != null
+                        ? request.accessPriceMinor()
+                        : session.getAccessPriceMinor()));
         return describeForOwner(session);
     }
 
@@ -276,9 +297,63 @@ public class LiveSessionService {
      * The playback URL on its own, for a client that already has the session and
      * wants to join. Fails with 402 rather than silently returning null, so the
      * client can open the paywall.
+     *
+     * @deprecated superseded by {@link #watch}, which returns whatever the
+     *         configured provider actually needs - a URL for HLS, a token for
+     *         WebRTC. Kept because clients predating the change still call it;
+     *         it throws on a provider that has no URL to give.
      */
+    @Deprecated
     @Transactional(readOnly = true)
     public String playbackUrl(UUID sessionId, User viewer) {
+        LiveSession session = requireJoinable(sessionId, viewer);
+        if (session.getPlaybackUrl() == null) {
+            throw ApiException.notFound("Playback URL");
+        }
+        return session.getPlaybackUrl();
+    }
+
+    /**
+     * What a viewer's client needs to watch, from whichever provider is wired in.
+     *
+     * <p>Minted per call rather than stored, which is the point: the entitlement
+     * check happens first and the credentials expire, so access can be taken away.
+     * A stored URL cannot be - once it has been handed out it is a password, and
+     * this is the reason to prefer a provider that issues tokens.
+     */
+    @Transactional(readOnly = true)
+    public StreamProvider.Credentials watch(UUID sessionId, User viewer) {
+        LiveSession session = requireJoinable(sessionId, viewer);
+        return streamProvider.viewCredentials(session, viewer);
+    }
+
+    /**
+     * What the host's client needs to start broadcasting.
+     *
+     * <p>Separate from creating the session, and re-issued on demand, because
+     * these expire: a creator who scheduled a broadcast for tomorrow asks again
+     * when she actually goes on air.
+     */
+    @Transactional(readOnly = true)
+    public StreamProvider.Credentials publish(UUID sessionId, User host) {
+        LiveSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> ApiException.notFound("Live session"));
+
+        boolean onRoster = hostRepository
+                .findBySessionIdAndUserId(sessionId, host.getId())
+                .filter(LiveHost::isOnAir)
+                .isPresent();
+        if (!session.getHost().getId().equals(host.getId()) && !onRoster) {
+            // Publishing credentials are the broadcast. Anyone holding them can
+            // appear on it, so this is an ownership check, not a courtesy.
+            throw ApiException.forbidden("not_your_session",
+                    "You are not broadcasting this session");
+        }
+        return streamProvider.publishCredentials(session, host);
+    }
+
+    /** The shared gate: entitled, or a co-host on the roster. */
+    private LiveSession requireJoinable(UUID sessionId, User viewer) {
         LiveSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> ApiException.notFound("Live session"));
 
@@ -293,10 +368,7 @@ public class LiveSessionService {
                     ? ApiException.unauthorized("Sign in to watch this session")
                     : ApiException.paymentRequired("Buy access to this broadcast to watch it");
         }
-        if (session.getPlaybackUrl() == null) {
-            throw ApiException.notFound("Playback URL");
-        }
-        return session.getPlaybackUrl();
+        return session;
     }
 
     // ---------------------------------------------------------------- internals

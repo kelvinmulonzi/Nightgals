@@ -60,7 +60,8 @@ public class FeedService {
      */
     @Transactional(readOnly = true)
     public PageResponse<MemberCardResponse> feed(User viewer, String city,
-                                                 Integer minAge, Integer maxAge, Pageable pageable) {
+                                                 Integer minAge, Integer maxAge,
+                                                 Boolean liveOnly, Pageable pageable) {
         // Swapped rather than rejected: someone dragging a range slider past
         // itself means the range, not an error page.
         if (minAge != null && maxAge != null && minAge > maxAge) {
@@ -77,6 +78,11 @@ public class FeedService {
                 city == null || city.isBlank() ? null : city.trim().toLowerCase(java.util.Locale.ROOT),
                 minAge,
                 maxAge,
+                // Filtered in the query rather than over the returned page. The
+                // client used to hide non-live cards after the fact, which meant
+                // "Live only" answered "nobody is live" whenever the people on
+                // air happened to sit past the first page of results.
+                liveOnly,
                 pageable);
 
         List<UUID> userIds = page.getContent().stream().map(p -> p.getUser().getId()).toList();

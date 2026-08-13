@@ -2,7 +2,9 @@ package com.nightgals.billing;
 
 import com.nightgals.common.BaseEntity;
 import com.nightgals.user.User;
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -36,10 +38,29 @@ public class Purchase extends BaseEntity {
     @Column(nullable = false, length = 20)
     private PurchaseType type;
 
-    /** Set for PROFILE_UNLOCK only. */
+    /** Set for PROFILE_UNLOCK only: the creator whose gallery is being bought. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "target_user_id")
     private User targetUser;
+
+    /**
+     * Set for PROFILE_UNLOCK only: exactly which items this payment covers.
+     *
+     * <p>A list, not a standing claim on the profile. It is fixed when the
+     * purchase is created, so the buyer receives what they were charged for even
+     * if the creator posts or deletes something before the payment settles - and
+     * it is what makes "anything posted later is bought separately" a fact about
+     * the data rather than a rule somebody has to remember to apply.
+     *
+     * <p>Ids rather than a relationship: this is a receipt, and it has to stay
+     * readable after a creator deletes one of the items on it.
+     */
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "purchase_media",
+            joinColumns = @JoinColumn(name = "purchase_id"))
+    @Column(name = "media_id", nullable = false)
+    @Builder.Default
+    private java.util.Set<java.util.UUID> bundleMediaIds = new java.util.HashSet<>();
 
     /** Set for SUBSCRIPTION only. */
     @Column(name = "plan_code", length = 30)

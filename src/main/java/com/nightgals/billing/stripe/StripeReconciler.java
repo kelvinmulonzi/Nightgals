@@ -3,6 +3,7 @@ package com.nightgals.billing.stripe;
 import com.nightgals.billing.BillingService;
 import com.nightgals.billing.ConditionalOnPaymentProvider;
 import com.nightgals.billing.Purchase;
+import com.nightgals.billing.PurchaseReconciler;
 import com.nightgals.billing.PurchaseRepository;
 import com.nightgals.billing.PurchaseStatus;
 import com.nightgals.common.ApiException;
@@ -34,12 +35,53 @@ import java.time.Instant;
 @Component
 @RequiredArgsConstructor
 @ConditionalOnPaymentProvider("stripe")
-public class StripeReconciler {
+public class StripeReconciler implements PurchaseReconciler {
 
     private final PurchaseRepository purchases;
     private final BillingService billing;
     private final StripeGateway gateway;
     private final StripeProperties properties;
+
+    @Override
+    public boolean handles(Purchase purchase) {
+        return "STRIPE".equals(purchase.getProvider());
+    }
+
+    /**
+     * Asks Stripe about one purchase, right now.
+     *
+     * <p>For when somebody is sitting on the confirmation screen watching a
+     * spinner. The sweep below settles the same purchase eventually, but
+     * "eventually" is up to two minutes away, and a payer who has just typed
+     * their card details reads two minutes of spinner as a payment that went
+     * wrong - which is how one payment becomes two.
+     *
+     * <p>Cheap and safe to call on demand: one API call, and settling is
+     * idempotent, so racing the sweep or a webhook is a no-op rather than a
+     * double grant.
+     *
+     * @return true when the check reached Stripe and applied its answer
+     */
+    @Override
+    public boolean reconcileNow(Purchase purchase) {
+        if (purchase.getStatus() != PurchaseStatus.PENDING
+                || !"STRIPE".equals(purchase.getProvider())) {
+            return false;
+        }
+        String sessionId = purchase.getProviderReference();
+        if (sessionId == null || sessionId.isBlank()) {
+            return false;
+        }
+        var session = gateway.session(sessionId);
+        if (session.isEmpty()) {
+            return false;
+        }
+        // Never stale-fails here. The sweep is what abandons an old purchase;
+        // this only ever moves one forward, so a slow Stripe cannot turn a
+        // payer's own status check into a failure.
+        apply(purchase, session.get(), Instant.MIN);
+        return true;
+    }
 
     @Scheduled(cron = "${nightgals.stripe.reconcile-cron:0 */2 * * * *}")
     public void reconcile() {

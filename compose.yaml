@@ -119,6 +119,22 @@ services:
       MTX_SRT: 'no'
       MTX_WEBRTC: 'yes'
       MTX_WEBRTCADDRESS: ':8889'
+      # Addresses the server offers viewers as ways to reach it. Left to itself
+      # it advertises whatever interfaces it finds, which on a machine running
+      # Docker is often a bridge address like 172.19.0.1 - technically valid and
+      # useless in practice.
+      #
+      # This matters more than it looks. A viewer who has not granted camera
+      # permission only ever offers mDNS candidates (`a1b2c3….local`), which no
+      # server can resolve, so the connection has to be made in the other
+      # direction - the browser reaching one of these. Get it wrong and the
+      # broadcast negotiates cleanly and then dies with "deadline exceeded while
+      # waiting connection", which reads like a network fault rather than a
+      # configuration one.
+      #
+      # Add the machine's LAN address for phones on the same wifi, and the
+      # public hostname before this is reachable from the internet.
+      MTX_WEBRTCADDITIONALHOSTS: '127.0.0.1'
       MTX_HLS: 'yes'
       MTX_HLSVARIANT: lowLatency
       MTX_HLSALWAYSREMUX: 'yes'

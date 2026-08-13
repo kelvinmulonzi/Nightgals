@@ -5,13 +5,17 @@ import com.nightgals.common.Money;
 import com.nightgals.config.GiftProperties;
 import com.nightgals.config.MonetizationProperties;
 import com.nightgals.earnings.EarningsService;
+import com.nightgals.common.PageResponse;
 import com.nightgals.live.dto.GiftFeedResponse;
+import com.nightgals.live.dto.GiftHistoryResponse;
+import com.nightgals.live.dto.GiftTotalsResponse;
 import com.nightgals.live.dto.GiftOptionResponse;
 import com.nightgals.live.dto.GiftResponse;
 import com.nightgals.referral.CreditService;
 import com.nightgals.user.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -113,6 +117,51 @@ public class GiftService {
                 creator.getId(), session.getId());
 
         return GiftResponse.of(gift);
+    }
+
+    /* ── Beyond the broadcast ──────────────────────────────────── */
+
+    /**
+     * What this account has gifted and been gifted, all time.
+     *
+     * <p>Both figures matter and they are not the same kind of number. What was
+     * sent is money that has left: it is spent, final, and the sender is owed
+     * nothing back. What was received is <b>gross</b> - the platform's cut comes
+     * out before a creator sees it, and what she can actually withdraw lives on
+     * the earnings ledger. Presenting the second as a balance would be a lie
+     * about money, which is the worst kind to tell on this screen.
+     */
+    @Transactional(readOnly = true)
+    public GiftTotalsResponse totalsFor(UUID userId) {
+        long sent = giftRepository.totalSentBy(userId);
+        long received = giftRepository.totalReceivedBy(userId);
+        String currency = monetization.currency();
+        return new GiftTotalsResponse(
+                sent, Money.plain(sent, currency), giftRepository.countBySenderId(userId),
+                received, Money.plain(received, currency), giftRepository.countByCreatorId(userId),
+                currency);
+    }
+
+    /**
+     * Every gift this account has sent, newest first.
+     *
+     * <p>The room's feed empties when the broadcast ends, so without this the
+     * only record a sender has of where their money went is a line in the credit
+     * ledger reading "Gift ROSE during broadcast &lt;uuid&gt;".
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<GiftHistoryResponse> sentBy(UUID userId, Pageable pageable) {
+        return PageResponse.from(
+                giftRepository.findBySenderIdOrderByCreatedAtDesc(userId, pageable),
+                GiftHistoryResponse::of);
+    }
+
+    /** Every gift this creator has received, newest first. */
+    @Transactional(readOnly = true)
+    public PageResponse<GiftHistoryResponse> receivedBy(UUID userId, Pageable pageable) {
+        return PageResponse.from(
+                giftRepository.findByCreatorIdOrderByCreatedAtDesc(userId, pageable),
+                GiftHistoryResponse::of);
     }
 
     /**

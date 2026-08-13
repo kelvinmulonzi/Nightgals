@@ -33,4 +33,41 @@ public interface GiftRepository extends JpaRepository<Gift, UUID> {
             SELECT COALESCE(SUM(g.amountMinor), 0) FROM Gift g
             WHERE g.liveSession.id = :sessionId""")
     long totalForSession(@Param("sessionId") UUID sessionId);
+
+    /* ── Beyond one broadcast ────────────────────────────────────
+       A gift is money leaving one account and arriving in another, and both
+       sides need to be able to look it up afterwards. The room's feed is
+       ephemeral - it empties when the broadcast ends - so without these the
+       only trace a sender has is a line in the credit ledger and the only
+       trace a creator has is an earnings entry. */
+
+    /** Everything this account has ever sent, newest first. */
+    org.springframework.data.domain.Page<Gift> findBySenderIdOrderByCreatedAtDesc(
+            UUID senderId, org.springframework.data.domain.Pageable pageable);
+
+    /** Everything this creator has ever received, newest first. */
+    org.springframework.data.domain.Page<Gift> findByCreatorIdOrderByCreatedAtDesc(
+            UUID creatorId, org.springframework.data.domain.Pageable pageable);
+
+    /** What this account has spent on gifts, all time. */
+    @Query("""
+            SELECT COALESCE(SUM(g.amountMinor), 0) FROM Gift g
+            WHERE g.sender.id = :userId""")
+    long totalSentBy(@Param("userId") UUID userId);
+
+    /**
+     * What this creator has been sent, all time, gross.
+     *
+     * <p>Gross - what viewers paid, before the platform's cut. What she actually
+     * keeps is on the earnings ledger, and the two must not be confused: showing
+     * a creator a number she cannot withdraw is worse than not showing one.
+     */
+    @Query("""
+            SELECT COALESCE(SUM(g.amountMinor), 0) FROM Gift g
+            WHERE g.creator.id = :userId""")
+    long totalReceivedBy(@Param("userId") UUID userId);
+
+    long countBySenderId(UUID senderId);
+
+    long countByCreatorId(UUID creatorId);
 }

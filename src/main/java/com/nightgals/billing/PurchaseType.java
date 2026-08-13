@@ -45,11 +45,22 @@ public enum PurchaseType {
     CREDIT_TOPUP,
 
     /**
-     * Retired: one payment opened everything a creator had posted. Kept because
-     * historical rows still carry it and their receipts still have to render.
-     * Nothing creates new ones.
+     * A viewer buying everything a creator has locked right now, in one payment,
+     * priced at the sum of those items.
+     *
+     * <p>It buys a <b>list of items</b>, not the profile forever - the ids are
+     * recorded on the purchase. Anything the creator posts afterwards is bought
+     * separately, which is the point: a standing claim on a profile would mean a
+     * creator's later work was already paid for at yesterday's price, and the
+     * more she posted the less each item earned her.
+     *
+     * <p>Grants the same {@code MediaUnlock} rows a per-item purchase does, so
+     * nothing downstream has to know a bundle happened. Earnings go to the
+     * creator exactly as they would have one sale at a time.
+     *
+     * <p>Rows created before this was reinstated bought a whole profile with no
+     * item list; they carry the same type, and their receipts still render.
      */
-    @Deprecated
     PROFILE_UNLOCK,
 
     /** Retired: an all-creators subscription. Historical rows only. */

@@ -33,21 +33,24 @@ public record LiveSessionRequest(
         @Min(1) @Max(720) Integer durationMinutes,
 
         @Schema(description = """
-                `FREE` (the default) lets anyone watch, including anonymous visitors. That
-                is how a broadcast normally earns now - through gifts sent while it runs,
-                not a door charge, and nobody gifts a creator they were not allowed to
-                watch.
+                Always `EXCLUSIVE`, which is also what you get by leaving it out. Every
+                broadcast sells entry per show.
 
-                `EXCLUSIVE` still sells entry per broadcast, for a creator who genuinely
-                wants to ticket one show.
+                `FREE` is rejected with `free_live_not_allowed` rather than quietly
+                charged - a creator who asked for an open room should not find out from
+                her earnings that viewers were billed at the door.
                 """)
         com.nightgals.media.ContentTier tier,
 
         @Schema(description = """
-                What a viewer pays to join this one broadcast, in minor units. Yours to
-                set, per stream. Ignored on a FREE session; null on an exclusive one
-                falls back to the platform default.
-                """, example = "5000")
+                **Required.** What a viewer pays to join this one broadcast, in minor
+                units, and yours to set per stream.
+
+                There is no default and no free option: omitting it fails with
+                `price_required`, and the platform's floor rejects anything at or near
+                zero. Nobody watches a broadcast they have not paid for, so the price is
+                decided by you before the room opens rather than after.
+                """, example = "5000", requiredMode = Schema.RequiredMode.REQUIRED)
         @Min(value = 0, message = "A price cannot be negative")
         Long accessPriceMinor) {
 }

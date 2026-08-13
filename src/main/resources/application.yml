@@ -338,10 +338,40 @@ nightgals:
     min-notice: PT30M
 
   live:
+    # Where broadcasts go. This application still serves no video; what changes
+    # with this setting is whether it PROVISIONS somewhere for one to happen.
+    #
+    #   manual   (default) the host supplies her own playbackUrl. What runs
+    #            against the local Owncast container, and what a creator with her
+    #            own OBS setup still gets. No token: the URL is the credential,
+    #            so access cannot be revoked once it has been handed out.
+    #   livekit  a room per broadcast, WebRTC, sub-second. Creators publish from
+    #            inside the app with no stream key, and every participant gets a
+    #            short-lived token minted after the entitlement check.
+    #
+    # Owncast is single-user - one instance carries one broadcast - so `manual`
+    # is a development arrangement. Anything with more than one creator live at
+    # once needs a provider that provisions per session.
+    provider: ${LIVE_PROVIDER:manual}
     # How long before a scheduled broadcast its followers are emailed.
     reminder-lead-time: PT30M
     # Sweep that sends those reminders.
     reminder-cron: "0 */5 * * * *"
+
+  # Only read when live.provider is `livekit`; every bean is conditional on it,
+  # so leaving this blank costs nothing.
+  livekit:
+    # From the LiveKit dashboard. Public - it is handed to every viewer, and what
+    # protects a room is the token rather than the address.
+    url: ${LIVEKIT_URL:}
+    api-key: ${LIVEKIT_API_KEY:}
+    # Signs every token, so anything holding it can mint a publisher token for
+    # any room. Environment only, never the repository.
+    api-secret: ${LIVEKIT_API_SECRET:}
+    # How long a minted token stays usable. Short: this is how long a revoked
+    # viewer keeps access, since the client talks to LiveKit directly afterwards
+    # and this server never sees it again.
+    token-ttl: PT4H
 
   # What a viewer can send a creator while she is on air. Broadcasts are free to
   # watch, so this is how a live earns: gifts, not a door charge.

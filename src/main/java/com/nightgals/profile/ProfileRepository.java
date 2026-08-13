@@ -48,6 +48,9 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
                    OR p.date_of_birth <= CURRENT_DATE - MAKE_INTERVAL(years => CAST(:minAge AS INT)))
               AND (CAST(:maxAge AS INT) IS NULL
                    OR p.date_of_birth > CURRENT_DATE - MAKE_INTERVAL(years => CAST(:maxAge AS INT) + 1))
+              AND (CAST(:liveOnly AS BOOLEAN) IS NULL OR CAST(:liveOnly AS BOOLEAN) = FALSE
+                   OR EXISTS (SELECT 1 FROM live_sessions ls
+                              WHERE ls.host_id = u.id AND ls.status = 'LIVE'))
             ORDER BY COALESCE((
                 SELECT MAX(CASE cp.package_code
                                WHEN 'BLACK_DIAMOND' THEN 3
@@ -73,11 +76,15 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
                    OR p.date_of_birth <= CURRENT_DATE - MAKE_INTERVAL(years => CAST(:minAge AS INT)))
               AND (CAST(:maxAge AS INT) IS NULL
                    OR p.date_of_birth > CURRENT_DATE - MAKE_INTERVAL(years => CAST(:maxAge AS INT) + 1))
+              AND (CAST(:liveOnly AS BOOLEAN) IS NULL OR CAST(:liveOnly AS BOOLEAN) = FALSE
+                   OR EXISTS (SELECT 1 FROM live_sessions ls
+                              WHERE ls.host_id = u.id AND ls.status = 'LIVE'))
             """,
             nativeQuery = true)
     Page<Profile> findFeed(@Param("viewerId") UUID viewerId,
                            @Param("city") String city,
                            @Param("minAge") Integer minAge,
                            @Param("maxAge") Integer maxAge,
+                           @Param("liveOnly") Boolean liveOnly,
                            Pageable pageable);
 }

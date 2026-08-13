@@ -150,6 +150,65 @@ public class BillingController {
     }
 
     @Operation(
+            summary = "What it costs to open everything this creator has locked",
+            description = """
+                    The sum of every locked photo and video on that profile, in one figure,
+                    so a viewer can see the whole gallery's price before deciding between
+                    it and a single item. There is no bundle discount: it costs what buying
+                    them one at a time costs and simply takes one payment.
+
+                    **Answered for the caller**, so it shrinks as they buy: somebody who
+                    owns two of four clips is quoted for the other two. `itemCount: 0`
+                    means there is nothing left to sell them and the offer should not be
+                    shown.
+
+                    Public - an anonymous caller owns nothing, so they get the full price
+                    of the gallery, which is exactly what a visitor deciding whether to
+                    sign up needs to see.
+                    """)
+    @ApiResponse(responseCode = "200", description = "The bundle price for this caller")
+    @GetMapping("/members/{userId}/unlock-all")
+    public UnlockAllQuote quoteUnlockAll(@AuthenticationPrincipal AuthUser principal,
+                                         @PathVariable UUID userId) {
+        return billingService.quoteUnlockAll(AuthUser.userOrNull(principal), userId);
+    }
+
+    @Operation(
+            summary = "Buy everything this creator has locked, in one payment",
+            description = """
+                    One purchase covering every locked photo and video on the profile, at
+                    the total from `GET /billing/members/{userId}/unlock-all`.
+
+                    **It buys the items that exist now, not the profile forever.** The list
+                    is pinned to the purchase when it is created, so anything the creator
+                    posts afterwards is bought separately - and a creator who deletes
+                    something between checkout and settlement cannot reduce what was paid
+                    for. Coming back later and buying again is the top-up for whatever has
+                    appeared since.
+
+                    Grants the same per-item access buying them one by one would, so the
+                    gallery, the lightbox and the entitlement checks all behave identically
+                    afterwards.
+
+                    Paying works exactly as it does for a single item - same `method`, same
+                    `payerMsisdn`, same instructions to follow.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Purchase created; follow the payment instructions")
+    @ApiResponse(responseCode = "400", description = "Your own profile, or `unknown_payment_method`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "No such member",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "409",
+            description = "`nothing_to_unlock` - you already own everything posted so far",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/members/{userId}/unlock-all")
+    public CheckoutResponse unlockAll(@AuthenticationPrincipal AuthUser principal,
+                                      @PathVariable UUID userId,
+                                      @Valid @RequestBody(required = false) CheckoutRequest request) {
+        return billingService.unlockAll(principal.user(), userId, choiceOf(request));
+    }
+
+    @Operation(
             summary = "Buy entry to one live broadcast",
             description = """
                     Each stream carries its own access price, set by its host. Buying one
@@ -339,6 +398,29 @@ public class BillingController {
     @GetMapping("/entitlements")
     public EntitlementResponse entitlements(@AuthenticationPrincipal AuthUser principal) {
         return billingService.entitlements(principal.user());
+    }
+
+    @Operation(
+            summary = "One purchase, checked with the provider",
+            description = """
+                    **What to poll after starting a payment.** Unlike the history list,
+                    this asks the payment provider directly when the purchase is still
+                    `PENDING`, so a card payment resolves on the first call instead of
+                    waiting for a webhook or the periodic sweep.
+
+                    Poll it every second or two after a redirect returns. It is a single
+                    row and one upstream call, not a page of history filtered client-side.
+
+                    A `PENDING` answer still means pending - on mobile money the payer has
+                    not approved on their handset yet. It never means failed.
+                    """)
+    @ApiResponse(responseCode = "200", description = "The purchase as it stands right now")
+    @ApiResponse(responseCode = "404", description = "No such purchase, or not yours",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/purchases/{purchaseId}")
+    public PurchaseResponse purchase(@AuthenticationPrincipal AuthUser principal,
+                                     @PathVariable UUID purchaseId) {
+        return billingService.purchase(principal.id(), purchaseId);
     }
 
     @Operation(summary = "My payment history")
