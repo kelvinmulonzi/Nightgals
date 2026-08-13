@@ -39,3 +39,10 @@ var/storage/
 # This comment existed without the rule under it, so .env was tracked and
 # committed anyway - which is how a Gmail app password, JWT_SECRET,
 # DOCUMENT_HASH_PEPPER and the MTN credentials ended up in the history.
+#
+# The rule itself, which is what was missing. GitHub's push protection caught
+# the Stripe secret key on the way out; without this line it would simply be
+# recommitted next time.
+.env
+.env.local
+.env.*.local
