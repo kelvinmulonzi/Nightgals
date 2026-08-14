@@ -49,27 +49,18 @@ public class ReelAdminController {
         return reelService.all();
     }
 
-    @Operation(summary = "Post a reel",
-            description = "Video only, same limits as creator uploads. It goes live at once and expires in 24 hours.")
-    @ApiResponse(responseCode = "201", description = "Posted")
-    @ApiResponse(responseCode = "400", description = "Not a video, or too large",
-            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<ReelResponse> post(
-            @AuthenticationPrincipal AuthUser principal,
-            @Parameter(description = "The video file", required = true) @RequestPart("file") MultipartFile file,
-            @Parameter(description = "Optional caption") @RequestParam(required = false) String caption) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(reelService.post(principal.user(), file, caption));
-    }
-
-    @Operation(summary = "Take a reel down early")
+    @Operation(summary = "Take any reel down",
+            description = """
+                    Moderation. Creators post their own reels and remove them at
+                    `DELETE /me/reels/{reelId}`; this one removes anybody's.
+                    """)
     @ApiResponse(responseCode = "204", description = "Removed")
     @ApiResponse(responseCode = "404", description = "No such reel",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @DeleteMapping("/{reelId}")
     public ResponseEntity<Void> remove(@PathVariable UUID reelId) {
-        reelService.remove(reelId);
+        // Null requester: staff moderation may take down anybody's reel.
+        reelService.remove(reelId, null);
         return ResponseEntity.noContent().build();
     }
 }

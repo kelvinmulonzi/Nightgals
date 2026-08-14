@@ -19,4 +19,10 @@ public interface ReelRepository extends JpaRepository<Reel, UUID> {
      * would drop the rows and leak every object they pointed at.
      */
     List<Reel> findByExpiresAtBefore(Instant now);
+
+    /** Everything one creator has posted, newest first. */
+    List<Reel> findByPostedByIdOrderByCreatedAtDesc(UUID creatorId);
+
+    /** How many of hers are still showing, for the per-creator cap. */
+    long countByPostedByIdAndExpiresAtAfter(UUID creatorId, Instant now);
 }

@@ -21,7 +21,20 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Short promotional clips on the public site, posted by staff, gone after a day.
+ * Short promotional clips on the public site, posted by creators, gone after a
+ * day.
+ *
+ * <p>A reel belongs to the creator who posted it and is an advert for her
+ * profile — tapping one on the landing page opens it. Staff used to post these
+ * and it was the wrong shape: a promo slot nobody could use except an
+ * administrator is a channel, not a shop window.
+ *
+ * <p>Free to <em>watch</em> — a reel never sits behind a paywall, because its
+ * whole job is to pull a stranger towards a profile where the paid things are.
+ *
+ * <p>Posting one needs an active package, like every other kind of upload. A
+ * reel is prime placement on the landing page, and a creator who has not paid to
+ * be on the platform should not be advertising on the front of it.
  *
  * <p>Two things enforce the deadline, and they do different jobs. Reads filter
  * on {@code expires_at}, which makes the cut-off exact — a reel disappears the
@@ -38,20 +51,46 @@ public class ReelService {
     private final ReelRepository reelRepository;
     private final StorageService storageService;
     private final UploadValidator uploadValidator;
+    private final com.nightgals.billing.CreatorPackageService creatorPackageService;
 
     /** How long a reel stays up. A day, unless a deployment says otherwise. */
     @Value("${nightgals.reels.lifetime:PT24H}")
     private Duration lifetime;
 
+    /**
+     * How many live reels one creator may have at a time.
+     *
+     * <p>The strip is a shared shop window on the landing page. Without a cap
+     * the creator who uploads most simply takes it, which is a worse outcome for
+     * everybody including her — a wall of one person reads as spam rather than
+     * as a directory worth browsing.
+     */
+    @Value("${nightgals.reels.max-per-creator:3}")
+    private int maxPerCreator;
+
     @Transactional
-    public ReelResponse post(User staff, MultipartFile file, String caption) {
+    public ReelResponse post(User creator, MultipartFile file, String caption) {
+        if (!creator.isApproved()) {
+            throw ApiException.forbidden("verification_required",
+                    "Verify your identity before posting a reel");
+        }
+        // Same bar as photos and video: 402 with the packages named, so the
+        // client can send her straight to the one screen that unblocks it.
+        creatorPackageService.requireActivePackage(creator);
         uploadValidator.validateVideo(file);
+
+        long liveNow = reelRepository.countByPostedByIdAndExpiresAtAfter(creator.getId(), Instant.now());
+        if (liveNow >= maxPerCreator) {
+            throw ApiException.conflict("reel_limit_reached",
+                    "You already have " + liveNow + " reels up. Each one clears itself "
+                    + "within a day, or take one down to post another.");
+        }
 
         StoredFile stored = storageService.store(file, "reels");
         Instant now = Instant.now();
 
         Reel reel = reelRepository.save(Reel.builder()
-                .postedBy(staff)
+                .postedBy(creator)
                 .storageKey(stored.storageKey())
                 .contentType(stored.contentType())
                 .sizeBytes(stored.sizeBytes())
@@ -59,7 +98,7 @@ public class ReelService {
                 .expiresAt(now.plus(lifetime))
                 .build());
 
-        log.info("Reel {} posted by {}, expires {}", reel.getId(), staff.getEmail(), reel.getExpiresAt());
+        log.info("Reel {} posted by {}, expires {}", reel.getId(), creator.getId(), reel.getExpiresAt());
         return ReelResponse.of(reel);
     }
 
@@ -95,14 +134,33 @@ public class ReelService {
         return new ReelDownload(storageService.load(reel.getStorageKey()), reel.getContentType());
     }
 
-    /** Taken down early by staff. */
+    /** This creator's own reels, expired ones included until the sweep clears them. */
+    @Transactional(readOnly = true)
+    public List<ReelResponse> mine(UUID creatorId) {
+        return reelRepository.findByPostedByIdOrderByCreatedAtDesc(creatorId)
+                .stream()
+                .map(ReelResponse::of)
+                .toList();
+    }
+
+    /**
+     * Taken down early.
+     *
+     * <p>{@code requester} null means staff moderation, which may remove
+     * anything. Otherwise it is the creator removing her own, and a reel that is
+     * not hers reports as not found rather than forbidden — whether somebody
+     * else's reel id exists is not her business.
+     */
     @Transactional
-    public void remove(UUID reelId) {
+    public void remove(UUID reelId, User requester) {
         Reel reel = reelRepository.findById(reelId)
                 .orElseThrow(() -> ApiException.notFound("Reel"));
+        if (requester != null && !reel.getPostedBy().getId().equals(requester.getId())) {
+            throw ApiException.notFound("Reel");
+        }
         storageService.delete(reel.getStorageKey());
         reelRepository.delete(reel);
-        log.info("Reel {} removed by staff", reelId);
+        log.info("Reel {} removed by {}", reelId, requester == null ? "staff" : requester.getId());
     }
 
     /**

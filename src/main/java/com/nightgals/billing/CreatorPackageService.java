@@ -153,6 +153,30 @@ public class CreatorPackageService {
      * @throws ApiException 402 when paying or upgrading is what unblocks this,
      *                      409 when deleting something is
      */
+    /**
+     * The package gate on its own, with no per-type allowance behind it.
+     *
+     * <p>For things a package covers but does not meter - a reel is a short
+     * advert that expires in a day, so counting it against a photo or video
+     * limit would be meaningless. What matters is that she is a paying creator
+     * at all.
+     *
+     * @throws ApiException 402 when there is no package and no trial running
+     */
+    @Transactional(readOnly = true)
+    public void requireActivePackage(User creator) {
+        if (!properties.enabled()) {
+            return;
+        }
+        if (activeFor(creator.getId()).isPresent() || creator.isOnTrial()) {
+            return;
+        }
+        throw ApiException.paymentRequired(
+                "Choose a package before you post. Pro, Diamond and Black Diamond all "
+                + "cover reels, photos and video - they differ on how much, and how "
+                + "visible you are.");
+    }
+
     @Transactional(readOnly = true)
     public void requireCanPublish(User creator, MediaType type, ContentTier tier) {
         if (!properties.enabled()) {

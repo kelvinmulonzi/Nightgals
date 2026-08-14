@@ -22,7 +22,14 @@ import java.util.List;
 import java.util.UUID;
 
 @Tag(name = "9. Reels", description = """
-        Short clips on the public site, posted by staff. **Public - no sign-in required.**
+        Creators' short promo clips on the public site. **Reading is public - no
+        sign-in required.**
+
+        A reel advertises the creator who posted it: every entry carries `creatorId`,
+        and a client should open her profile when one is tapped. That is the whole
+        purpose of the strip - it is a way into a profile, not a video feed.
+
+        Free to watch and free to post. Posting is under `/me/reels`.
 
         Each one is live for 24 hours and then deletes itself, files and all. Expired
         reels are gone from the listing immediately and return 404 on their file, even
