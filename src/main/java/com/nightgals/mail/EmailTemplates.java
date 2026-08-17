@@ -13,12 +13,16 @@ package com.nightgals.mail;
  */
 final class EmailTemplates {
 
-    // Kept in step with the frontend's theme.js "dark luxe" palette.
+    // The accent tracks the frontend's theme.js, where the brand colour moved
+    // from gold to magenta; these two were still the old "dark luxe" values, so
+    // every email arrived in a palette the site itself no longer uses. The names
+    // stay GOLD/GOLD_BRIGHT — they mean "brand accent", and renaming them here
+    // would touch every template for no gain, exactly as in global.css.
     private static final String BG = "#08070A";
     private static final String SURFACE = "#16151D";
     private static final String LINE = "#272531";
-    private static final String GOLD = "#D9B46A";
-    private static final String GOLD_BRIGHT = "#F0D49A";
+    private static final String GOLD = "#E6007E";
+    private static final String GOLD_BRIGHT = "#FF3DA5";
     private static final String TEXT = "#F4F1EA";
     private static final String MUTED = "#9A948A";
 

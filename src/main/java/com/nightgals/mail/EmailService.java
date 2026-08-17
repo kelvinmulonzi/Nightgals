@@ -39,7 +39,12 @@ public class EmailService {
     public EmailService(JavaMailSender mailSender, NotificationProperties properties) {
         this.mailSender = mailSender;
         this.properties = properties;
-        this.brand = "Nightgals";
+        // Follows MAIL_FROM_NAME rather than a constant. It was hardcoded to
+        // "Nightgals", which put the wrong name in the subject, the wordmark and
+        // the footer of every message the platform sent from noctyvera.com — a
+        // sign-in code branded as another product is exactly what a phishing
+        // filter is looking for, and what a recipient is told to distrust.
+        this.brand = properties.fromName();
     }
 
     // ------------------------------------------------------------ one-time codes
