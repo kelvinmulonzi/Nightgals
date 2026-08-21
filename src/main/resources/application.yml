@@ -428,6 +428,10 @@ nightgals:
     # Blank on purpose. A default here means every deployment that forgets to set
     # it gets a superadmin whose password is published in this repository.
     admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    # The public handle to give it. Blank means NightgalsTeam. Either way it is
+    # only a preference: if a real member already holds the name, the admin gets
+    # a generated one instead rather than the boot failing on the unique index.
+    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}
 
   storage:
     # s3 for object storage (AWS in production, MinIO locally - same protocol),
