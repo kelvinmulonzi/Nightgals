@@ -4,6 +4,7 @@ import com.nightgals.billing.CreatorPackageService;
 import com.nightgals.billing.EntitlementService;
 import com.nightgals.billing.ItemPricingService;
 import com.nightgals.common.PageResponse;
+import com.nightgals.discovery.dto.CityCountResponse;
 import com.nightgals.discovery.dto.MemberCardResponse;
 import com.nightgals.live.LiveSessionRepository;
 import com.nightgals.media.MediaAsset;
@@ -59,9 +60,10 @@ public class FeedService {
      *               people can see who is here before signing up
      */
     @Transactional(readOnly = true)
-    public PageResponse<MemberCardResponse> feed(User viewer, String city,
+    public PageResponse<MemberCardResponse> feed(User viewer, String q, String city, String gender,
                                                  Integer minAge, Integer maxAge,
-                                                 Boolean liveOnly, Pageable pageable) {
+                                                 Boolean liveOnly, Boolean premiumOnly,
+                                                 Pageable pageable) {
         // Swapped rather than rejected: someone dragging a range slider past
         // itself means the range, not an error page.
         if (minAge != null && maxAge != null && minAge > maxAge) {
@@ -75,7 +77,9 @@ public class FeedService {
                 // the caller's own card, and a null bind parameter here would hit
                 // the same Postgres type-inference problem as the city filter.
                 viewer == null ? ANONYMOUS : viewer.getId(),
+                blankToNull(q),
                 city == null || city.isBlank() ? null : city.trim().toLowerCase(java.util.Locale.ROOT),
+                blankToNull(gender),
                 minAge,
                 maxAge,
                 // Filtered in the query rather than over the returned page. The
@@ -83,6 +87,7 @@ public class FeedService {
                 // "Live only" answered "nobody is live" whenever the people on
                 // air happened to sit past the first page of results.
                 liveOnly,
+                premiumOnly,
                 pageable);
 
         List<UUID> userIds = page.getContent().stream().map(p -> p.getUser().getId()).toList();
@@ -159,5 +164,26 @@ public class FeedService {
             byUser.computeIfAbsent(asset.getUser().getId(), k -> new ArrayList<>()).add(asset);
         }
         return byUser;
+    }
+
+    /**
+     * The city shortcuts beside the filters.
+     *
+     * <p>Read straight from the same population the feed draws from, so a
+     * shortcut always lands on the number it advertised.
+     */
+    @Transactional(readOnly = true)
+    public List<CityCountResponse> popularCities(int limit) {
+        return profileRepository.findPopularCities(Math.clamp(limit, 1, 50)).stream()
+                .map(row -> new CityCountResponse((String) row[0], ((Number) row[1]).longValue()))
+                .toList();
+    }
+
+    /**
+     * A search box that was typed in and then cleared arrives as "", which is
+     * not the same request as "no filter" unless we say so here.
+     */
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }
