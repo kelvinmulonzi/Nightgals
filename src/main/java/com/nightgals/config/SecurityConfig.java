@@ -41,6 +41,8 @@ public class SecurityConfig {
             "/api/v1/auth/email/verify",
             "/api/v1/auth/refresh",
             "/api/v1/auth/logout",
+            // The city picker, needed by the signup flow before there is a session.
+            "/api/v1/cities",
             "/api/v1/usernames/suggestions",
             "/api/v1/billing/plans",
             // MTN has no credential of ours to present, so this cannot be

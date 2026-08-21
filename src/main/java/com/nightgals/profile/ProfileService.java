@@ -66,8 +66,14 @@ public class ProfileService {
         profile.setBio(request.bio());
         profile.setDateOfBirth(request.dateOfBirth());
         profile.setGender(request.gender());
-        profile.setCity(request.city());
-        profile.setCountry(request.country());
+        // Stored canonically or not at all. The picker sends one of the listed
+        // spellings, but the API is public and this is the only thing standing
+        // between the city counts and four spellings of Douala.
+        profile.setCity(resolveCity(request.city()));
+        // Not asked for and not taken from the request: this is a Cameroon
+        // platform - XAF, MTN Mobile Money, and a city list to match - so
+        // country is a question with one answer.
+        profile.setCountry(COUNTRY);
         if (request.vibe() != null) {
             profile.setVibe(request.vibe());
         }
@@ -80,6 +86,22 @@ public class ProfileService {
         profile.setWhatsappNumber(request.whatsappNumber() == null || request.whatsappNumber().isBlank()
                 ? null : request.whatsappNumber().trim());
         return ProfileResponse.of(profileRepository.save(profile));
+    }
+
+    /** The only country this platform operates in. */
+    private static final String COUNTRY = "Cameroon";
+
+    /**
+     * @throws ApiException 400 when a city was given that is not on the list.
+     *         Blank is fine and means "not saying", which is not the same thing.
+     */
+    private static String resolveCity(String requested) {
+        if (requested == null || requested.isBlank()) {
+            return null;
+        }
+        return CameroonCity.canonical(requested).orElseThrow(() -> ApiException.badRequest(
+                "unknown_city",
+                "Pick a city from the list. Accepted: " + String.join(", ", CameroonCity.all())));
     }
 
     /**
