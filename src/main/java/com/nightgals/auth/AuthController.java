@@ -1,6 +1,7 @@
 package com.nightgals.auth;
 
 import com.nightgals.auth.dto.AuthResponse;
+import com.nightgals.auth.dto.GoogleLoginRequest;
 import com.nightgals.auth.dto.LoginRequest;
 import com.nightgals.auth.dto.LoginResponse;
 import com.nightgals.auth.dto.OtpChallengeResponse;
@@ -127,6 +128,41 @@ public class AuthController {
     @PostMapping("/otp/verify")
     public AuthResponse verifyOtp(@Valid @RequestBody OtpVerifyRequest request) {
         return authService.verifyLoginCode(request);
+    }
+
+    @Operation(
+            summary = "Sign in with Google",
+            description = """
+                    One call, no code. Send the `credential` the browser got back from
+                    Google and this returns tokens.
+
+                    The confirmation code exists to prove somebody reads the inbox on
+                    the account. A Google token minted for this application already
+                    proves that, so there is nothing left for a code to establish.
+
+                    **This is the viewers' door.** A first sign-in creates a `VIEWER`
+                    account - never a creator, because becoming one is a deliberate
+                    step with a profile and identity documents behind it, and it is
+                    taken later through `POST /api/v1/me/become-creator`.
+
+                    A creator who has a password gets a `403` and is sent back to
+                    `POST /auth/login`: their account holds identity documents and a
+                    payout balance, and its two-step sign-in is not something a Google
+                    token should be able to shorten. The one exception is a creator who
+                    has never had a password - somebody who joined through Google and
+                    upgraded - for whom this is the only door there has ever been.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "Signed in, account created if it was new")
+    @ApiResponse(responseCode = "401", description = "The token is not a valid, current Google token for this app",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "403", description = "Creator account, or account suspended or closed",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "Google sign-in is not configured in this environment",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/oauth/google")
+    public AuthResponse googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
+        return authService.googleLogin(request);
     }
 
     @Operation(

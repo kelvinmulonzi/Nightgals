@@ -115,6 +115,15 @@ nightgals:
     max-challenges-per-hour: 10
     purge-cron: "0 15 4 * * *"
 
+  # Google sign-in, for viewers. Unset here means the button never renders on
+  # the site and POST /auth/oauth/google answers 503 - the feature is off, not
+  # half-on accepting tokens it cannot check.
+  google:
+    # The OAuth *Web application* client id from the Google Cloud console. The
+    # site needs the same value as VITE_GOOGLE_CLIENT_ID; a mismatch shows up as
+    # every sign-in failing verification, because the audience will not match.
+    client-id: ${GOOGLE_CLIENT_ID:}
+
   app:
     cors-allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:5173}
     minimum-age: 18

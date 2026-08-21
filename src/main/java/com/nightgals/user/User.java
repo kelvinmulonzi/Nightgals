@@ -40,8 +40,26 @@ public class User extends BaseEntity {
     @Column(name = "username_changed_at")
     private Instant usernameChangedAt;
 
-    @Column(name = "password_hash", nullable = false, length = 100)
+    /**
+     * Null for an account that arrived through Google and never chose one.
+     *
+     * <p>Every read of this has to cope with that: {@code AuthService.login}
+     * refuses a null hash outright rather than handing it to bcrypt, which
+     * keeps password sign-in impossible on an account that has no password.
+     */
+    @Column(name = "password_hash", length = 100)
     private String passwordHash;
+
+    /**
+     * Google's stable identifier for this person, set when they first sign in
+     * with Google. Null for everybody who registered with a password.
+     *
+     * <p>Matched on before the email address is: somebody who changes the
+     * address on their Google account is still the same person, and looking
+     * them up by email alone would open them a second account.
+     */
+    @Column(name = "google_subject", length = 64)
+    private String googleSubject;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "account_type", nullable = false, length = 10)

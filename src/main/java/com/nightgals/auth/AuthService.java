@@ -1,6 +1,7 @@
 package com.nightgals.auth;
 
 import com.nightgals.auth.dto.AuthResponse;
+import com.nightgals.auth.dto.GoogleLoginRequest;
 import com.nightgals.auth.dto.LoginRequest;
 import com.nightgals.auth.dto.LoginResponse;
 import com.nightgals.auth.dto.OtpChallengeResponse;
@@ -8,6 +9,8 @@ import com.nightgals.auth.dto.OtpVerifyRequest;
 import com.nightgals.auth.dto.RefreshRequest;
 import com.nightgals.auth.dto.RegisterRequest;
 import com.nightgals.auth.dto.RegisterResponse;
+import com.nightgals.auth.google.GoogleIdentity;
+import com.nightgals.auth.google.GoogleTokenVerifier;
 import com.nightgals.auth.otp.OtpPurpose;
 import com.nightgals.auth.otp.OtpService;
 import com.nightgals.common.ApiException;
@@ -54,6 +57,7 @@ public class AuthService {
     private final EmailService emailService;
     private final ReferralService referralService;
     private final MonetizationProperties monetization;
+    private final GoogleTokenVerifier googleTokenVerifier;
 
     /**
      * Creates the account and signs it in immediately.
@@ -66,8 +70,15 @@ public class AuthService {
     @Transactional
     public RegisterResponse register(RegisterRequest request, String ipAddress) {
         String email = request.email().trim().toLowerCase(Locale.ROOT);
+        // Not a dead end. Whichever type they picked here, the account they already
+        // have can simply become that type once they have proved it is theirs -
+        // so the message points at signing in rather than at choosing a different
+        // address. Registering a second time is the one thing that would cost
+        // them their unlocks and their history.
         if (userRepository.existsByEmailIgnoreCase(email)) {
-            throw ApiException.conflict("email_taken", "An account with this email already exists");
+            throw ApiException.conflict("email_taken",
+                    "You already have an account with this email. Sign in, and you can "
+                            + "switch it between watching and creating whenever you like.");
         }
 
         // Both are resolved before the row is written: the trial because it is
@@ -122,7 +133,11 @@ public class AuthService {
                 // wrong, so the endpoint cannot be used to enumerate accounts.
                 .orElseThrow(() -> ApiException.unauthorized("Invalid email or password"));
 
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        // A Google account has no hash to compare against. Same message as a
+        // wrong password, deliberately: saying "this one uses Google" would
+        // confirm the address is registered to anyone who asks.
+        if (user.getPasswordHash() == null
+                || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw ApiException.unauthorized("Invalid email or password");
         }
         requireSignInAllowed(user);
@@ -152,6 +167,72 @@ public class AuthService {
             user.setEmailVerified(true);
             log.info("Address on account {} confirmed by a sign-in code", user.getId());
         }
+        return issueTokens(user);
+    }
+
+    /**
+     * Signs in with Google, creating a viewer account the first time.
+     *
+     * <p>No code is emailed here and none is needed: the whole purpose of the
+     * confirmation code is proving that whoever is signing in reads that inbox,
+     * and a Google token minted for this application proves exactly that. Asking
+     * anyway would be asking the same question twice.
+     *
+     * <p><b>This is the viewers' door.</b> A creator account holds identity
+     * documents and a payout balance, and its sign-in is two steps on purpose -
+     * letting a Google token stand in for both would quietly remove the second
+     * for the accounts that can least afford it. So a creator who has a password
+     * is sent back to it.
+     *
+     * <p>The exception is a creator who has no password at all: somebody who
+     * signed up here as a viewer and later called {@code /me/become-creator}.
+     * Google is the only door they have ever had, and refusing it would not make
+     * them safer - it would lock them out of their own account.
+     */
+    @Transactional
+    public AuthResponse googleLogin(GoogleLoginRequest request) {
+        GoogleIdentity identity = googleTokenVerifier.verify(request.idToken());
+        if (!identity.emailVerified()) {
+            throw ApiException.unauthorized(
+                    "That Google account's email address is not confirmed with Google.");
+        }
+
+        // Subject first, address second. Somebody who changed the address on
+        // their Google account is still the same person, and matching on email
+        // alone would quietly open them a second account.
+        User user = userRepository.findByGoogleSubject(identity.subject())
+                .or(() -> userRepository.findByEmailIgnoreCase(identity.email()))
+                .orElse(null);
+
+        if (user == null) {
+            return issueTokens(createGoogleViewer(identity, request.referralCode()));
+        }
+
+        if (user.isCreator() && user.getPasswordHash() != null) {
+            throw ApiException.forbidden("creator_password_required",
+                    "Creator accounts sign in with an email address and password.");
+        }
+        requireSignInAllowed(user);
+
+        // First Google sign-in on an account that was registered with a
+        // password: link it, so a later address change on the Google side still
+        // finds this account.
+        if (user.getGoogleSubject() == null) {
+            user.setGoogleSubject(identity.subject());
+            log.info("Linked Google to existing account {}", user.getId());
+        }
+        // The address on file is deliberately left alone when it no longer
+        // matches Google's. Addresses are unique here, so copying one across
+        // can collide with somebody else's account - and the subject we matched
+        // on is the better identifier anyway. Changing it is an account
+        // settings decision, not a side effect of signing in.
+        if (!user.getEmail().equalsIgnoreCase(identity.email())) {
+            log.info("Account {} signs in with Google under a different address now", user.getId());
+        }
+        if (!user.isEmailVerified()) {
+            user.setEmailVerified(true);
+        }
+        user.setLastLoginAt(Instant.now());
         return issueTokens(user);
     }
 
@@ -213,6 +294,49 @@ public class AuthService {
     }
 
     // ------------------------------------------------------------ internals
+
+    /**
+     * The Google half of {@link #register}, minus everything a viewer never needs.
+     *
+     * <p>Always a viewer. Creating is the one moment the account type is decided,
+     * and Google is not where somebody chooses to become a creator - that is a
+     * deliberate step through {@code /me/become-creator}, with a profile and
+     * identity documents behind it.
+     */
+    private User createGoogleViewer(GoogleIdentity identity, String referralCode) {
+        Instant trialEnds = monetization.trialEnabled()
+                ? Instant.now().plus(monetization.freeTrial()) : null;
+        User referrer = referralService.resolve(referralCode).orElse(null);
+
+        User user = userRepository.save(User.builder()
+                .email(identity.email())
+                .accountType(AccountType.VIEWER)
+                .googleSubject(identity.subject())
+                .referralCode(referralService.generateUniqueCode())
+                .referredBy(referrer)
+                .trialEndsAt(trialEnds)
+                .username(usernameService.generateUnique())
+                // No password was ever chosen and none is invented. See the
+                // column's own note on User - a random hash here would be a
+                // credential nobody can use and everybody has to reason about.
+                .passwordHash(null)
+                .role(Role.USER)
+                .status(UserStatus.ACTIVE)
+                .verificationStatus(VerificationStatus.UNVERIFIED)
+                // Google already proved control of the inbox.
+                .emailVerified(true)
+                .lastLoginAt(Instant.now())
+                .build());
+
+        log.info("Registered VIEWER account {} through Google{}", user.getId(),
+                referrer == null ? "" : " (referred by " + referrer.getId() + ")");
+
+        // The password path sends this when the confirmation code comes back.
+        // There is no such step here, so this is the only chance - and it is
+        // sent quietly, because a mail outage must not cost us a signup.
+        emailService.sendWelcome(user.getEmail(), user.getUsername(), false);
+        return user;
+    }
 
     private void requireSignInAllowed(User user) {
         if (user.getStatus() == UserStatus.SUSPENDED) {

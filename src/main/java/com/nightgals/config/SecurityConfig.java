@@ -32,6 +32,10 @@ public class SecurityConfig {
             "/api/v1/auth/login",
             // Answering a challenge is how a session is obtained, so it cannot
             // itself require one.
+            // Google sign-in is a way of obtaining a session, so like the rest
+            // of these it cannot require one. The token in the body is the
+            // credential, and GoogleTokenVerifier checks it.
+            "/api/v1/auth/oauth/google",
             "/api/v1/auth/otp/verify",
             "/api/v1/auth/otp/resend",
             "/api/v1/auth/email/verify",
@@ -85,6 +89,9 @@ public class SecurityConfig {
                         // the POST on the same path is the buy endpoint.
                         .requestMatchers(HttpMethod.GET, "/api/v1/billing/creator-packages").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members").permitAll()
+                        // The city shortcuts beside the filters. Counts only, over the
+                        // same population the public feed already shows.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/members/cities").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/profile").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/media").permitAll()
                         // What the whole gallery costs. A price is the shop window's
