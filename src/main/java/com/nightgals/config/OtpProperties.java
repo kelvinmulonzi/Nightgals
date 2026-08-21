@@ -23,6 +23,22 @@ public record OtpProperties(
          */
         boolean loginRequired,
 
+        /**
+         * Whether the sign-in code is asked for once per account rather than on
+         * every sign-in.
+         *
+         * <p>The code has one job: prove that whoever holds the password also reads
+         * the inbox on the account. Once that has been proven it stays proven, so
+         * with this on an account is asked exactly once - at first sign-in, or at
+         * registration if they confirmed their address there - and signs in on the
+         * password alone afterwards.
+         *
+         * <p>{@code email_verified} is the record of that proof, which is why it is
+         * what this reads rather than a login counter. Setting this to {@code false}
+         * restores a code on every sign-in.
+         */
+        boolean loginFirstTimeOnly,
+
         /** Digits in a code. */
         int length,
 

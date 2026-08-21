@@ -30,6 +30,22 @@ public interface EarningRepository extends JpaRepository<Earning, UUID> {
             """)
     long sumLifetimeNet(@Param("creatorId") UUID creatorId);
 
+    /**
+     * Money owed to this creator that has not been paid out yet.
+     *
+     * <p>PAID is excluded deliberately: it has already left, so it is history
+     * rather than a claim on us. Anything else is a balance somebody would lose
+     * if their account stopped being a creator account.
+     */
+    @Query("""
+            SELECT COALESCE(SUM(e.netMinor), 0) FROM Earning e
+            WHERE e.creator.id = :creatorId
+              AND e.status IN (com.nightgals.earnings.EarningStatus.PENDING,
+                               com.nightgals.earnings.EarningStatus.AVAILABLE,
+                               com.nightgals.earnings.EarningStatus.RESERVED)
+            """)
+    long sumUnpaidNet(@Param("creatorId") UUID creatorId);
+
     List<Earning> findByCreatorIdAndStatus(UUID creatorId, EarningStatus status);
 
     List<Earning> findByPayoutId(UUID payoutId);

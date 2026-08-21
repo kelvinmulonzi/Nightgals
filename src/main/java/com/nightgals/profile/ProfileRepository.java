@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -27,7 +28,13 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
      * overlapping packages ranks by the better one and still yields one row -
      * a join would duplicate her card.
      *
-     * <p>{@code city} must already be lower-cased by the caller.
+     * <p>{@code city} must already be lower-cased by the caller. {@code q} is a
+     * loose match across handle, display name, city and bio - somebody typing a
+     * place into the search box should find that place, not nothing.
+     *
+     * <p>There is deliberately no "verified only" filter: the first line of the
+     * WHERE clause already requires APPROVED, so every row this can ever return
+     * is verified and such a filter could only ever be a no-op.
      *
      * <p>Age is filtered as a date range rather than by computing each row's age:
      * {@code minAge} becomes "born on or before today minus that many years", and
@@ -44,6 +51,12 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND p.discoverable = TRUE
               AND u.id <> :viewerId
               AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
+              AND (CAST(:gender AS TEXT) IS NULL OR p.gender = CAST(:gender AS TEXT))
+              AND (CAST(:q AS TEXT) IS NULL
+                   OR p.display_name ILIKE '%' || CAST(:q AS TEXT) || '%'
+                   OR u.username      ILIKE '%' || CAST(:q AS TEXT) || '%'
+                   OR p.city          ILIKE '%' || CAST(:q AS TEXT) || '%'
+                   OR p.bio           ILIKE '%' || CAST(:q AS TEXT) || '%')
               AND (CAST(:minAge AS INT) IS NULL
                    OR p.date_of_birth <= CURRENT_DATE - MAKE_INTERVAL(years => CAST(:minAge AS INT)))
               AND (CAST(:maxAge AS INT) IS NULL
@@ -51,6 +64,12 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND (CAST(:liveOnly AS BOOLEAN) IS NULL OR CAST(:liveOnly AS BOOLEAN) = FALSE
                    OR EXISTS (SELECT 1 FROM live_sessions ls
                               WHERE ls.host_id = u.id AND ls.status = 'LIVE'))
+              AND (CAST(:premiumOnly AS BOOLEAN) IS NULL OR CAST(:premiumOnly AS BOOLEAN) = FALSE
+                   OR EXISTS (SELECT 1 FROM creator_packages cp
+                              WHERE cp.creator_id = u.id
+                                AND cp.cancelled_at IS NULL
+                                AND cp.starts_at <= NOW()
+                                AND cp.expires_at > NOW()))
             ORDER BY COALESCE((
                 SELECT MAX(CASE cp.package_code
                                WHEN 'BLACK_DIAMOND' THEN 3
@@ -72,6 +91,12 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND p.discoverable = TRUE
               AND u.id <> :viewerId
               AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
+              AND (CAST(:gender AS TEXT) IS NULL OR p.gender = CAST(:gender AS TEXT))
+              AND (CAST(:q AS TEXT) IS NULL
+                   OR p.display_name ILIKE '%' || CAST(:q AS TEXT) || '%'
+                   OR u.username      ILIKE '%' || CAST(:q AS TEXT) || '%'
+                   OR p.city          ILIKE '%' || CAST(:q AS TEXT) || '%'
+                   OR p.bio           ILIKE '%' || CAST(:q AS TEXT) || '%')
               AND (CAST(:minAge AS INT) IS NULL
                    OR p.date_of_birth <= CURRENT_DATE - MAKE_INTERVAL(years => CAST(:minAge AS INT)))
               AND (CAST(:maxAge AS INT) IS NULL
@@ -79,12 +104,50 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND (CAST(:liveOnly AS BOOLEAN) IS NULL OR CAST(:liveOnly AS BOOLEAN) = FALSE
                    OR EXISTS (SELECT 1 FROM live_sessions ls
                               WHERE ls.host_id = u.id AND ls.status = 'LIVE'))
+              AND (CAST(:premiumOnly AS BOOLEAN) IS NULL OR CAST(:premiumOnly AS BOOLEAN) = FALSE
+                   OR EXISTS (SELECT 1 FROM creator_packages cp
+                              WHERE cp.creator_id = u.id
+                                AND cp.cancelled_at IS NULL
+                                AND cp.starts_at <= NOW()
+                                AND cp.expires_at > NOW()))
             """,
             nativeQuery = true)
     Page<Profile> findFeed(@Param("viewerId") UUID viewerId,
+                           @Param("q") String q,
                            @Param("city") String city,
+                           @Param("gender") String gender,
                            @Param("minAge") Integer minAge,
                            @Param("maxAge") Integer maxAge,
                            @Param("liveOnly") Boolean liveOnly,
+                           @Param("premiumOnly") Boolean premiumOnly,
                            Pageable pageable);
+
+    /**
+     * Which cities actually have somebody in them, commonest first.
+     *
+     * <p>Feeds the shortcut list beside the filters. Counted over exactly the
+     * same population the feed draws from - approved, active, discoverable -
+     * because a shortcut that promises 12 and delivers 3 is worse than no
+     * shortcut. The caller's own card is not excluded here: these are city
+     * totals, not search results, and a count that shifted depending on who was
+     * looking would be odd.
+     *
+     * <p>Blank cities are dropped rather than grouped into an "unknown" bucket:
+     * city is optional on a profile, and "(none) 41" is not a place anyone wants
+     * to browse.
+     */
+    @Query(value = """
+            SELECT INITCAP(TRIM(p.city)) AS city, COUNT(*) AS total
+            FROM profiles p
+            JOIN users u ON u.id = p.user_id
+            WHERE u.verification_status = 'APPROVED'
+              AND u.status = 'ACTIVE'
+              AND p.discoverable = TRUE
+              AND p.city IS NOT NULL
+              AND TRIM(p.city) <> ''
+            GROUP BY INITCAP(TRIM(p.city))
+            ORDER BY total DESC, city ASC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<Object[]> findPopularCities(@Param("limit") int limit);
 }

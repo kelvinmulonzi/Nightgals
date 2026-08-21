@@ -105,6 +105,11 @@ nightgals:
     # A password alone never signs anyone in. Set false only for local work or
     # as a break-glass measure if the mail provider is down.
     login-required: ${OTP_LOGIN_REQUIRED:true}
+    # Ask for that code once per account rather than on every sign-in. The code
+    # proves the inbox, and an inbox stays proven - so a member answers one at
+    # first sign-in and uses their password on its own after that. Set false to
+    # go back to a code every time.
+    login-first-time-only: ${OTP_LOGIN_FIRST_TIME_ONLY:true}
     length: 6
     ttl: PT10M
     max-attempts: 5
@@ -114,6 +119,15 @@ nightgals:
     # challenges until one code happens to be guessable.
     max-challenges-per-hour: 10
     purge-cron: "0 15 4 * * *"
+
+  # Google sign-in, for viewers. Unset here means the button never renders on
+  # the site and POST /auth/oauth/google answers 503 - the feature is off, not
+  # half-on accepting tokens it cannot check.
+  google:
+    # The OAuth *Web application* client id from the Google Cloud console. The
+    # site needs the same value as VITE_GOOGLE_CLIENT_ID; a mismatch shows up as
+    # every sign-in failing verification, because the audience will not match.
+    client-id: ${GOOGLE_CLIENT_ID:}
 
   app:
     cors-allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:5173}
@@ -428,6 +442,10 @@ nightgals:
     # Blank on purpose. A default here means every deployment that forgets to set
     # it gets a superadmin whose password is published in this repository.
     admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    # The public handle to give it. Blank means NightgalsTeam. Either way it is
+    # only a preference: if a real member already holds the name, the admin gets
+    # a generated one instead rather than the boot failing on the unique index.
+    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}
 
   storage:
     # s3 for object storage (AWS in production, MinIO locally - same protocol),

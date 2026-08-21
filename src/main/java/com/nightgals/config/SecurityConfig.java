@@ -32,11 +32,22 @@ public class SecurityConfig {
             "/api/v1/auth/login",
             // Answering a challenge is how a session is obtained, so it cannot
             // itself require one.
+            // Google sign-in is a way of obtaining a session, so like the rest
+            // of these it cannot require one. The token in the body is the
+            // credential, and GoogleTokenVerifier checks it.
+            "/api/v1/auth/oauth/google",
             "/api/v1/auth/otp/verify",
             "/api/v1/auth/otp/resend",
             "/api/v1/auth/email/verify",
+            // Recovery cannot require a session: somebody who has forgotten their
+            // password has no way to get one. The code emailed to the address on
+            // the account is what stands in for the credential here.
+            "/api/v1/auth/password/forgot",
+            "/api/v1/auth/password/reset",
             "/api/v1/auth/refresh",
             "/api/v1/auth/logout",
+            // The city picker, needed by the signup flow before there is a session.
+            "/api/v1/cities",
             "/api/v1/usernames/suggestions",
             "/api/v1/billing/plans",
             // MTN has no credential of ours to present, so this cannot be
@@ -85,6 +96,9 @@ public class SecurityConfig {
                         // the POST on the same path is the buy endpoint.
                         .requestMatchers(HttpMethod.GET, "/api/v1/billing/creator-packages").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members").permitAll()
+                        // The city shortcuts beside the filters. Counts only, over the
+                        // same population the public feed already shows.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/members/cities").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/profile").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/media").permitAll()
                         // What the whole gallery costs. A price is the shop window's

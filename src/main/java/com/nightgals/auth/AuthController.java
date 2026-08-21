@@ -1,6 +1,8 @@
 package com.nightgals.auth;
 
 import com.nightgals.auth.dto.AuthResponse;
+import com.nightgals.auth.dto.ForgotPasswordRequest;
+import com.nightgals.auth.dto.GoogleLoginRequest;
 import com.nightgals.auth.dto.LoginRequest;
 import com.nightgals.auth.dto.LoginResponse;
 import com.nightgals.auth.dto.OtpChallengeResponse;
@@ -9,6 +11,7 @@ import com.nightgals.auth.dto.RefreshRequest;
 import com.nightgals.auth.dto.RegisterRequest;
 import com.nightgals.auth.dto.RegisterResponse;
 import com.nightgals.auth.dto.ResendRequest;
+import com.nightgals.auth.dto.ResetPasswordRequest;
 import com.nightgals.common.ErrorResponse;
 import com.nightgals.user.AuthUser;
 import io.swagger.v3.oas.annotations.Operation;
@@ -130,6 +133,41 @@ public class AuthController {
     }
 
     @Operation(
+            summary = "Sign in with Google",
+            description = """
+                    One call, no code. Send the `credential` the browser got back from
+                    Google and this returns tokens.
+
+                    The confirmation code exists to prove somebody reads the inbox on
+                    the account. A Google token minted for this application already
+                    proves that, so there is nothing left for a code to establish.
+
+                    **This is the viewers' door.** A first sign-in creates a `VIEWER`
+                    account - never a creator, because becoming one is a deliberate
+                    step with a profile and identity documents behind it, and it is
+                    taken later through `POST /api/v1/me/become-creator`.
+
+                    A creator who has a password gets a `403` and is sent back to
+                    `POST /auth/login`: their account holds identity documents and a
+                    payout balance, and its two-step sign-in is not something a Google
+                    token should be able to shorten. The one exception is a creator who
+                    has never had a password - somebody who joined through Google and
+                    upgraded - for whom this is the only door there has ever been.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "Signed in, account created if it was new")
+    @ApiResponse(responseCode = "401", description = "The token is not a valid, current Google token for this app",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "403", description = "Creator account, or account suspended or closed",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "503", description = "Google sign-in is not configured in this environment",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/oauth/google")
+    public AuthResponse googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
+        return authService.googleLogin(request);
+    }
+
+    @Operation(
             summary = "Send a fresh code",
             description = """
                     Replaces the code on an outstanding challenge - the previous one stops
@@ -177,6 +215,55 @@ public class AuthController {
     public OtpChallengeResponse requestEmailCode(@AuthenticationPrincipal AuthUser principal,
                                                  HttpServletRequest http) {
         return authService.requestEmailVerification(principal.user(), clientIp(http));
+    }
+
+    @Operation(
+            summary = "Step 1 of a forgotten password: email a recovery code",
+            description = """
+                    Always returns a challenge, whether or not that address has an account.
+
+                    An address nobody has registered gets a challenge id that answers to
+                    nothing and no email; a suspended or closed account is treated the same
+                    way. That is deliberate - a response that differed would turn this into a
+                    way of asking whether a given person is a member of this site, which is
+                    not a harmless thing to be able to ask here.
+
+                    So the client shows the code screen either way, and somebody who mistyped
+                    their address finds out from the code that never arrives.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "A code is on its way, if that address has an account")
+    @ApiResponse(responseCode = "409", description = "Too many codes requested for this account",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/password/forgot")
+    public OtpChallengeResponse forgotPassword(@Valid @RequestBody ForgotPasswordRequest request,
+                                               HttpServletRequest http) {
+        return authService.requestPasswordReset(request, clientIp(http));
+    }
+
+    @Operation(
+            summary = "Step 2 of a forgotten password: set a new one and sign in",
+            description = """
+                    The code is the whole check here - there is no old password to ask for, by
+                    definition - so it gets the same treatment as any other: single use, short
+                    lived, and burned after a few wrong guesses. `POST /auth/otp/resend` sends
+                    a fresh one for the same challenge.
+
+                    The new password must satisfy the same rules as registration.
+
+                    **Every existing session is revoked.** Recovery exists for accounts that
+                    may already be in somebody else's hands, so anything already signed in is
+                    signed out; the tokens in the response are the only ones left working.
+                    """,
+            security = @SecurityRequirement(name = ""))
+    @ApiResponse(responseCode = "200", description = "Password changed and signed in")
+    @ApiResponse(responseCode = "401", description = "Wrong, expired, or already-used code",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "403", description = "Account suspended or closed",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/password/reset")
+    public AuthResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return authService.resetPassword(request);
     }
 
     @Operation(

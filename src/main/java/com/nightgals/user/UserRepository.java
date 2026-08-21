@@ -15,6 +15,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.email) = LOWER(:email)")
     boolean existsByEmailIgnoreCase(@Param("email") String email);
 
+    /** Google's subject claim, which outlives any address change on that account. */
+    Optional<User> findByGoogleSubject(String googleSubject);
+
     @Query("SELECT u FROM User u WHERE LOWER(u.username) = LOWER(:username)")
     Optional<User> findByUsernameIgnoreCase(@Param("username") String username);
 

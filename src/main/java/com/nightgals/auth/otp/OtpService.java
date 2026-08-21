@@ -209,8 +209,39 @@ public class OtpService {
         return removed;
     }
 
-    public boolean loginCodeRequired() {
-        return properties.loginRequired();
+    /**
+     * Whether this sign-in needs a code.
+     *
+     * <p>The code proves that whoever has the password also reads the inbox on the
+     * account. That proof does not decay, so by default it is asked for once and
+     * recorded as {@code email_verified} - at first sign-in for most people, or at
+     * registration for anyone who answered the confirmation code there.
+     *
+     * <p>Set {@code nightgals.otp.login-first-time-only} to false to ask every
+     * time, or {@code login-required} to false to stop asking at all.
+     */
+    public boolean loginCodeRequiredFor(User user) {
+        if (!properties.loginRequired()) {
+            return false;
+        }
+        return !properties.loginFirstTimeOnly() || !user.isEmailVerified();
+    }
+
+    /**
+     * A challenge-shaped response that answers to nothing.
+     *
+     * <p>For "forgot my password" against an address that has no account. Returning
+     * nothing, or a different status, would turn the endpoint into a way of asking
+     * whether somebody is a member here - which on this platform is not a harmless
+     * thing to be able to ask. So the caller gets the same screen either way, and
+     * the code they are waiting for simply never arrives.
+     *
+     * <p>Nothing is written and no mail is sent: the id is random and will not be
+     * found when it comes back.
+     */
+    public Challenge decoy(String email) {
+        return new Challenge(UUID.randomUUID(), Instant.now().plus(properties.ttl()),
+                maskEmail(email), properties.length());
     }
 
     public String maskEmail(String email) {
@@ -238,6 +269,8 @@ public class OtpService {
             case LOGIN -> emailService.sendLoginCode(
                     user.getEmail(), user.getUsername(), code, properties.ttl());
             case EMAIL_VERIFICATION -> emailService.sendVerificationCode(
+                    user.getEmail(), user.getUsername(), code, properties.ttl());
+            case PASSWORD_RESET -> emailService.sendPasswordResetCode(
                     user.getEmail(), user.getUsername(), code, properties.ttl());
         }
     }

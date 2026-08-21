@@ -25,6 +25,9 @@ public interface MediaRepository extends JpaRepository<MediaAsset, UUID> {
 
     List<MediaAsset> findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(UUID userId, MediaStatus status);
 
+    /** Everything this member has posted, whatever its type or state. */
+    long countByUserId(UUID userId);
+
     long countByUserIdAndType(UUID userId, MediaType type);
 
     long countByUserIdAndTypeAndTier(UUID userId, MediaType type, ContentTier tier);

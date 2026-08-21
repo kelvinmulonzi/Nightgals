@@ -82,7 +82,57 @@ public class EmailService {
                 "Your confirmation code is " + code);
     }
 
+    /**
+     * The code that authorises a new password. Blocking, and throws if it cannot
+     * be sent.
+     *
+     * <p>Worded to be useful to the wrong recipient too: somebody who did not ask
+     * for this is being told that another person typed their address into a
+     * recovery form, and the one thing they need to know is that ignoring it costs
+     * them nothing.
+     */
+    public void sendPasswordResetCode(String to, String username, String code, Duration validFor) {
+        String body = EmailTemplates.heading("Reset your password")
+                + EmailTemplates.paragraph("Hi " + username
+                        + ", use this code to choose a new password.")
+                + EmailTemplates.code(code)
+                + EmailTemplates.paragraph("It expires in " + minutes(validFor)
+                        + " and can only be used once.")
+                + EmailTemplates.note("""
+                        If you did not ask to reset your password, ignore this - your password \
+                        has not changed and nobody can change it without this code. Never share \
+                        it, including with anybody claiming to be from support.""");
+
+        sendOrThrow(to, "Your " + brand + " password reset code: " + code,
+                body, "Your password reset code is " + code + ". It expires in "
+                        + minutes(validFor) + ".",
+                "Your password reset code is " + code);
+    }
+
     // ------------------------------------------------------------ notifications
+
+    /**
+     * Sent after a password is changed, to the address it was changed on.
+     *
+     * <p>This is the alarm. If the change was not theirs, this message is the only
+     * thing that tells them so while they can still do something about it - which
+     * is why it is sent even though the change has already succeeded.
+     */
+    @Async
+    public void sendPasswordChanged(String to, String username) {
+        String body = EmailTemplates.heading("Your password was changed")
+                + EmailTemplates.paragraph("Hi " + username
+                        + ", the password on your " + brand
+                        + " account has just been changed, and everywhere it was signed in "
+                        + "has been signed out.")
+                + EmailTemplates.paragraph("If that was you, there is nothing to do.")
+                + EmailTemplates.note("If it was not, reset your password now and contact us - "
+                        + "whoever did this can read the email on this address.")
+                + EmailTemplates.button("Sign in", properties.appBaseUrl() + "/login");
+
+        sendQuietly(to, "Your " + brand + " password was changed", body,
+                "The password on your " + brand + " account was changed.");
+    }
 
     /** Sent once the address is confirmed. */
     @Async
