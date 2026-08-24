@@ -163,7 +163,7 @@ class PaymentMethodTest {
 
         profileService.createOrUpdate(user, new ProfileRequest(
                 null, "Here for the weekend", LocalDate.of(1996, 5, 5),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
 
         User managed = reload(user);
         managed.setVerificationStatus(VerificationStatus.APPROVED);

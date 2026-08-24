@@ -53,6 +53,15 @@ public class KycService {
      */
     @Transactional
     public KycSubmissionResponse startOrUpdate(User user, KycSubmissionRequest request) {
+        // Nothing here has an answer when the deployment does not do identity
+        // checks: there is no queue to join, and accepting a submission would
+        // move an already-approved account back to PENDING_REVIEW and quietly
+        // strip the publishing rights it was auto-granted.
+        if (!appProperties.kycRequired()) {
+            throw ApiException.conflict("kyc_disabled",
+                    "Identity verification is not required on this platform");
+        }
+
         // Submitting identity documents is unambiguously creator intent.
         profileService.upgradeToCreatorIfNeeded(user);
         Profile profile = profileRepository.findByUserId(user.getId())
@@ -67,8 +76,19 @@ public class KycService {
                     "You already have a submission awaiting review");
         }
 
-        requireAdult(request.dateOfBirth());
-        requireMatchingDateOfBirth(request.dateOfBirth(), profile.getDateOfBirth());
+        // Asked for once, on the profile. It used to be collected again here and
+        // checked against itself, which is a second chance to mistype the one
+        // field that has to match the document.
+        LocalDate dateOfBirth = request.dateOfBirth() == null
+                ? profile.getDateOfBirth() : request.dateOfBirth();
+        if (dateOfBirth == null) {
+            throw ApiException.badRequest("dob_required",
+                    "Add your date of birth to your profile before submitting documents");
+        }
+        requireAdult(dateOfBirth);
+        // Still enforced for a client that does send one: a mismatch means the
+        // two screens disagree, and the reviewer needs to know which is right.
+        requireMatchingDateOfBirth(dateOfBirth, profile.getDateOfBirth());
 
         String normalisedNumber = request.documentNumber().replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
         String hash = hashDocumentNumber(normalisedNumber);
@@ -92,7 +112,7 @@ public class KycService {
 
         submission.setDocumentType(request.documentType());
         submission.setFullName(request.fullName().trim());
-        submission.setDateOfBirth(request.dateOfBirth());
+        submission.setDateOfBirth(dateOfBirth);
         submission.setCountryOfIssue(request.countryOfIssue().toUpperCase(Locale.ROOT));
         submission.setDocumentNumberHash(hash);
         submission.setDocumentNumberLast4(lastFour(normalisedNumber));

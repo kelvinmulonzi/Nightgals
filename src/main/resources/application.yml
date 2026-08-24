@@ -135,6 +135,11 @@ nightgals:
     # Mixed into the document-number hash. Rotating this invalidates duplicate
     # detection for existing rows, so set it once, per environment, and keep it.
     document-hash-pepper: ${DOCUMENT_HASH_PEPPER:dev-only-pepper-change-me}
+    # Whether creators must pass an identity check before they can publish.
+    # Off: saving a profile finishes onboarding and she goes straight to paying
+    # for a package. On: the document upload and review queue come first, and
+    # nothing can be published until a moderator approves.
+    kyc-required: ${KYC_REQUIRED:false}
 
   # Short staff-posted clips on the public site.
   reels:

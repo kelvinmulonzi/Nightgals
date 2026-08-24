@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountUpgradeService {
 
     private final UserRepository userRepository;
+    private final com.nightgals.config.AppProperties appProperties;
     private final ProfileRepository profileRepository;
     private final MediaRepository mediaRepository;
     private final EarningRepository earningRepository;
@@ -45,6 +46,19 @@ public class AccountUpgradeService {
         if (!managed.isCreator()) {
             managed.setAccountType(AccountType.CREATOR);
             log.info("Account {} upgraded to CREATOR", managed.getId());
+        }
+
+        // Without identity checks, approval is granted when a profile is saved -
+        // but somebody who already had one when she switched has nothing left to
+        // save. Leaving her unapproved would report onboarding DONE while every
+        // publishing guard still refused her, which is a redirect loop rather
+        // than a screen.
+        if (!appProperties.kycRequired()
+                && managed.getVerificationStatus() == VerificationStatus.UNVERIFIED
+                && profileRepository.existsByUserId(managed.getId())) {
+            managed.setVerificationStatus(VerificationStatus.APPROVED);
+            log.info("Account {} approved on upgrade; identity checks are switched off",
+                    managed.getId());
         }
         return me(managed);
     }
@@ -115,6 +129,7 @@ public class AccountUpgradeService {
     }
 
     private MeResponse me(User user) {
-        return MeResponse.of(user, profileRepository.existsByUserId(user.getId()));
+        return MeResponse.of(user, profileRepository.existsByUserId(user.getId()),
+                appProperties.kycRequired());
     }
 }

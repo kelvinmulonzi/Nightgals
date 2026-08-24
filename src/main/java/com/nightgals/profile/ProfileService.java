@@ -53,8 +53,13 @@ public class ProfileService {
 
         // Date of birth is what the reviewer checks the ID against, so it cannot
         // be edited once a decision has been made on this account.
-        boolean locked = account.getVerificationStatus() == VerificationStatus.APPROVED
-                || account.getVerificationStatus() == VerificationStatus.PENDING_REVIEW;
+        //
+        // Only while there is a reviewer. With identity checks switched off the
+        // approval below is automatic and means nothing was ever checked, so
+        // freezing the field on the strength of it would lock a typo in forever.
+        boolean locked = appProperties.kycRequired()
+                && (account.getVerificationStatus() == VerificationStatus.APPROVED
+                        || account.getVerificationStatus() == VerificationStatus.PENDING_REVIEW);
         if (locked && profile.getDateOfBirth() != null
                 && !profile.getDateOfBirth().equals(request.dateOfBirth())) {
             throw ApiException.conflict("dob_locked",
@@ -85,6 +90,16 @@ public class ProfileService {
         // find a separate control for it.
         profile.setWhatsappNumber(request.whatsappNumber() == null || request.whatsappNumber().isBlank()
                 ? null : request.whatsappNumber().trim());
+
+        // With identity checks off, a saved profile is the whole of onboarding.
+        // Approving here rather than teaching every caller about the flag is
+        // what keeps the nine existing isApproved() checks correct as written.
+        if (!appProperties.kycRequired()
+                && account.getVerificationStatus() == VerificationStatus.UNVERIFIED) {
+            account.setVerificationStatus(VerificationStatus.APPROVED);
+            log.info("Account {} approved on profile save; identity checks are switched off",
+                    account.getId());
+        }
         return ProfileResponse.of(profileRepository.save(profile));
     }
 

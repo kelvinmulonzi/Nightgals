@@ -59,7 +59,7 @@ class MediaUploadWebTest {
         User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
         profileService.createOrUpdate(user, new ProfileRequest(
                 null, null, LocalDate.of(1995, 2, 2),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
         user.setVerificationStatus(VerificationStatus.APPROVED);
         bearer = "Bearer " + jwtService.issueAccessToken(userRepository.save(user));
     }

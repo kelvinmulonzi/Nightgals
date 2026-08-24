@@ -45,10 +45,27 @@ public record MeResponse(
                 allowableValues = {"BROWSE", "CREATE_PROFILE", "SUBMIT_KYC", "AWAIT_REVIEW",
                         "RESUBMIT_KYC", "DONE"})
         String nextStep,
+
+        @Schema(description = """
+                Whether this deployment asks creators for identity documents.
+
+                When false there is no document step and no review queue: a saved
+                profile finishes onboarding, `nextStep` goes straight to `DONE`, and
+                the client should not offer or mention verification at all.
+                """)
+        boolean kycRequired,
         Instant lastLoginAt,
         Instant createdAt) {
 
+    /**
+     * For callers with no view of configuration - the tests, chiefly. Assumes
+     * identity checks are on, which is the stricter of the two answers.
+     */
     public static MeResponse of(User user, boolean profileComplete) {
+        return of(user, profileComplete, true);
+    }
+
+    public static MeResponse of(User user, boolean profileComplete, boolean kycRequired) {
         return new MeResponse(
                 user.getId(),
                 user.getEmail(),
@@ -63,12 +80,13 @@ public record MeResponse(
                 user.getReferralCode(),
                 profileComplete,
                 user.isApproved(),
-                nextStep(user, profileComplete),
+                nextStep(user, profileComplete, kycRequired),
+                kycRequired,
                 user.getLastLoginAt(),
                 user.getCreatedAt());
     }
 
-    private static String nextStep(User user, boolean profileComplete) {
+    private static String nextStep(User user, boolean profileComplete, boolean kycRequired) {
         // A viewer has nothing to complete. Telling them to create a profile or
         // upload a passport is what made the app feel like it was for somebody else.
         if (!user.isCreator()) {
@@ -76,6 +94,12 @@ public record MeResponse(
         }
         if (!profileComplete) {
             return "CREATE_PROFILE";
+        }
+        // Nothing to submit and nobody to wait for. Read here as well as at the
+        // point of approval so an account that predates the switch is not sent
+        // to a document form this deployment no longer has.
+        if (!kycRequired) {
+            return "DONE";
         }
         return switch (user.getVerificationStatus()) {
             case UNVERIFIED -> "SUBMIT_KYC";

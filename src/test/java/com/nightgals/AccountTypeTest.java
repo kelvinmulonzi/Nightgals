@@ -87,7 +87,7 @@ class AccountTypeTest {
         // Nobody fills in a public profile by accident, so this is treated as intent
         // rather than bounced back with an error.
         profileService.createOrUpdate(viewer, new ProfileRequest(
-                null, null, LocalDate.of(1996, 1, 1), Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                null, null, LocalDate.of(1996, 1, 1), Gender.FEMALE, "Douala", "Cameroon", null, null));
 
         User after = reload(viewer);
         assertThat(after.getAccountType()).isEqualTo(AccountType.CREATOR);
@@ -114,7 +114,7 @@ class AccountTypeTest {
     void startingKycUpgrades() {
         User viewer = register(AccountType.VIEWER);
         profileService.createOrUpdate(viewer, new ProfileRequest(
-                null, null, LocalDate.of(1996, 1, 1), Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                null, null, LocalDate.of(1996, 1, 1), Gender.FEMALE, "Douala", "Cameroon", null, null));
 
         kycService.startOrUpdate(reload(viewer), new KycSubmissionRequest(
                 DocumentType.PASSPORT, "A Creator", LocalDate.of(1996, 1, 1), "KE", "P1234567"));
@@ -166,7 +166,7 @@ class AccountTypeTest {
 
         // And the creator path is now open to them.
         profileService.createOrUpdate(reload(viewer), new ProfileRequest(
-                null, null, LocalDate.of(1994, 3, 3), Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                null, null, LocalDate.of(1994, 3, 3), Gender.FEMALE, "Douala", "Cameroon", null, null));
     }
 
     @Test
@@ -193,7 +193,7 @@ class AccountTypeTest {
     private User approvedCreator() {
         User user = register(AccountType.CREATOR);
         profileService.createOrUpdate(user, new ProfileRequest(
-                null, null, LocalDate.of(1996, 5, 5), Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                null, null, LocalDate.of(1996, 5, 5), Gender.FEMALE, "Douala", "Cameroon", null, null));
         User managed = reload(user);
         managed.setVerificationStatus(VerificationStatus.APPROVED);
         return userRepository.save(managed);

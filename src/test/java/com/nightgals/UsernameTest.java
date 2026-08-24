@@ -64,7 +64,7 @@ class UsernameTest {
         User owner = register();
         profileService.createOrUpdate(owner, new ProfileRequest(
                 "Amina", "Afrobeats and rooftop bars", LocalDate.of(1998, 4, 12),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
 
         // An owner-or-staff view keeps everything.
         var ownView = profileService.getOwn(owner.getId());
@@ -95,7 +95,7 @@ class UsernameTest {
         User user = register();
         var profile = profileService.createOrUpdate(user, new ProfileRequest(
                 null, null, LocalDate.of(1996, 3, 3),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
 
         assertThat(profile.displayName()).isNull();
         assertThat(profile.username()).isNotBlank();

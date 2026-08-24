@@ -48,6 +48,9 @@ public class SecurityConfig {
             "/api/v1/auth/logout",
             // The city picker, needed by the signup flow before there is a session.
             "/api/v1/cities",
+            // Deployment settings the sign-up screen needs before there is a
+            // session to read /me with. Configuration only - no account data.
+            "/api/v1/config",
             "/api/v1/usernames/suggestions",
             "/api/v1/billing/plans",
             // MTN has no credential of ours to present, so this cannot be

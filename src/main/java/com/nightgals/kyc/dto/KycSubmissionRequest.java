@@ -23,7 +23,7 @@ public record KycSubmissionRequest(
 
         @Schema(description = "Date of birth on the document. Must match the profile.",
                 example = "1998-04-12", requiredMode = Schema.RequiredMode.REQUIRED)
-        @NotNull @Past LocalDate dateOfBirth,
+        @Past LocalDate dateOfBirth,
 
         @Schema(description = "ISO 3166-1 alpha-2 country that issued the document",
                 example = "KE", requiredMode = Schema.RequiredMode.REQUIRED)

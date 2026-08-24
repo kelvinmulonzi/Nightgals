@@ -77,6 +77,10 @@ nightgals:
       - http://localhost:3000
     minimum-age: 18
     document-hash-pepper: test-pepper
+    # On, so the existing suite keeps exercising the identity-check path it was
+    # written against. Production defaults to off; KycDisabledTest turns it off
+    # itself and covers the other half.
+    kyc-required: true
   monetization:
     enabled: true
     currency: XAF

@@ -78,9 +78,9 @@ class PaywallTest {
         // "From X" is the cheapest locked thing, not the first one found.
         assertThat(card.fromPriceMinor()).isEqualTo(3_000L);
 
-        assertThat(feedService.feed(viewer, null, "nairobi", null, null, null, null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, null, "douala", null, null, null, null, null, PageRequest.of(0, 50)).content())
                 .anySatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
-        assertThat(feedService.feed(viewer, null, "Kisumu", null, null, null, null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, null, "Bamenda", null, null, null, null, null, PageRequest.of(0, 50)).content())
                 .noneSatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
     }
 
@@ -525,7 +525,7 @@ class PaywallTest {
 
         profileService.createOrUpdate(user, new ProfileRequest(
                 null, "Out most weekends", LocalDate.of(1996, 5, 5),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
 
         User managed = reload(user);
         managed.setVerificationStatus(VerificationStatus.APPROVED);

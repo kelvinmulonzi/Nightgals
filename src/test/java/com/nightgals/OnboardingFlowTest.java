@@ -69,7 +69,7 @@ class OnboardingFlowTest {
         // 2. Profile, then KYC details.
         profileService.createOrUpdate(member, new ProfileRequest(
                 "Amina", "Afrobeats and rooftop bars", LocalDate.of(1998, 4, 12),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
 
         var submission = kycService.startOrUpdate(member, new KycSubmissionRequest(
                 DocumentType.NATIONAL_ID, "Amina Wanjiru Kamau",
@@ -118,7 +118,7 @@ class OnboardingFlowTest {
         User member = registerMember();
         profileService.createOrUpdate(member, new ProfileRequest(
                 "Brian", null, LocalDate.of(1995, 1, 1),
-                Gender.MALE, "Nairobi", "Kenya", null, null));
+                Gender.MALE, "Douala", "Cameroon", null, null));
         kycService.startOrUpdate(member, new KycSubmissionRequest(
                 DocumentType.PASSPORT, "Brian Otieno", LocalDate.of(1995, 1, 1), "KE", "P99887766"));
         kycService.uploadDocument(member, DocumentKind.PASSPORT_PAGE, photo());
@@ -142,7 +142,7 @@ class OnboardingFlowTest {
         User member = registerMember();
         profileService.createOrUpdate(member, new ProfileRequest(
                 "Cate", null, LocalDate.of(1999, 6, 6),
-                Gender.FEMALE, "Mombasa", "Kenya", null, null));
+                Gender.FEMALE, "Buea", "Cameroon", null, null));
 
         assertThatThrownBy(() -> kycService.startOrUpdate(member, new KycSubmissionRequest(
                 DocumentType.NATIONAL_ID, "Cate Njeri", LocalDate.of(1997, 6, 6), "KE", "12345678")))
@@ -156,7 +156,7 @@ class OnboardingFlowTest {
         User member = registerMember();
         assertThatThrownBy(() -> profileService.createOrUpdate(member, new ProfileRequest(
                 "Kid", null, LocalDate.now().minusYears(16),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null)))
+                Gender.FEMALE, "Douala", "Cameroon", null, null)))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("at least 18");
     }
@@ -168,7 +168,7 @@ class OnboardingFlowTest {
         User staff = createStaff(VerificationStatus.UNVERIFIED);
         profileService.createOrUpdate(staff, new ProfileRequest(
                 "Mod", null, LocalDate.of(1990, 2, 2),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
         kycService.startOrUpdate(staff, new KycSubmissionRequest(
                 DocumentType.PASSPORT, "Mod Erator", LocalDate.of(1990, 2, 2), "KE", "P11112222"));
         kycService.uploadDocument(staff, DocumentKind.PASSPORT_PAGE, photo());

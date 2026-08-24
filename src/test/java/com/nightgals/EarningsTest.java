@@ -226,7 +226,7 @@ class EarningsTest {
         User user = register();
         profileService.createOrUpdate(user, new ProfileRequest(
                 null, "Out most weekends", LocalDate.of(1996, 5, 5),
-                Gender.FEMALE, "Nairobi", "Kenya", null, null));
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
         User managed = reload(user);
         managed.setVerificationStatus(VerificationStatus.APPROVED);
         return userRepository.save(managed);
