@@ -2,6 +2,7 @@ package com.nightgals.stats;
 
 import com.nightgals.common.ErrorResponse;
 import com.nightgals.stats.dto.GrowthResponse;
+import com.nightgals.stats.dto.PaymentHealthResponse;
 import com.nightgals.stats.dto.RevenueResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -58,6 +59,35 @@ public class StatsAdminController {
             @Parameter(description = "How many days back to reach, including today. Clamped to 1-365.")
             @RequestParam(defaultValue = "30") int days) {
         return statsService.revenue(days);
+    }
+
+    @Operation(
+            summary = "Payment attempts, outcomes and what went wrong",
+            description = """
+                    What share of attempted payments actually got through, day by day
+                    and per provider, plus the commonest failure causes and a count of
+                    payments still pending long after they should have resolved.
+
+                    Revenue says how much came in. This says how much of what people
+                    tried came in - a platform can take the same money two weeks running
+                    while quietly failing a third of its attempts, and only this shows it.
+
+                    Windowed on when a payment was **started**, unlike revenue, which is
+                    dated by settlement: a failure belongs to the day somebody tried.
+
+                    `settleRatePercent` is settled over settled-plus-failed. Cancellations
+                    are excluded from both halves - backing out of a card form is not a
+                    failure - and it is null rather than zero where nothing resolved, so a
+                    quiet day is not drawn as an outage.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Daily outcomes, provider split, failure causes and the stuck count")
+    @ApiResponse(responseCode = "403", description = "Caller is not an admin",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/payments")
+    public PaymentHealthResponse payments(
+            @Parameter(description = "How many days back to reach, including today. Clamped to 1-365.")
+            @RequestParam(defaultValue = "30") int days) {
+        return statsService.paymentHealth(days);
     }
 
     @Operation(

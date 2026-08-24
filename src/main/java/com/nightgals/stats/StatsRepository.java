@@ -140,6 +140,116 @@ public interface StatsRepository extends Repository<Purchase, UUID> {
     MixRow mix();
 
     /** One day of one account type. */
+    /**
+     * Attempts per day, split into the two outcomes that matter.
+     *
+     * <p>Dated by {@code created_at}, not settlement: this counts <em>tries</em>,
+     * and the question a settle rate answers is "of everything started that day,
+     * how much got through". Dating by completion would move a failure and its
+     * retry onto different days and flatter the rate on both.
+     *
+     * <p>{@code CANCELLED} is counted apart from {@code FAILED}. Somebody
+     * changing their mind at the card form is not the platform losing a payment,
+     * and folding the two together turns ordinary hesitation into an incident.
+     */
+    @Query(value = """
+            SELECT CAST(p.created_at AS date)                          AS "date",
+                   COUNT(*) FILTER (WHERE p.status = 'COMPLETED')      AS "settled",
+                   COUNT(*) FILTER (WHERE p.status = 'FAILED')         AS "failed",
+                   COUNT(*) FILTER (WHERE p.status = 'CANCELLED')      AS "cancelled",
+                   COUNT(*) FILTER (WHERE p.status = 'PENDING')        AS "pending"
+            FROM purchases p
+            WHERE p.created_at >= :from AND p.created_at < :to
+            GROUP BY 1
+            ORDER BY 1
+            """, nativeQuery = true)
+    List<DailyOutcomeRow> dailyOutcomes(@Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * The same outcomes for the window, per payment provider.
+     *
+     * <p>This is the panel that earns the dashboard. A platform taking cards and
+     * Mobile Money has two independent ways to silently stop working, and a
+     * single blended settle rate hides one failing behind the other still
+     * working.
+     */
+    @Query(value = """
+            SELECT p.provider                                          AS "provider",
+                   COUNT(*) FILTER (WHERE p.status = 'COMPLETED')      AS "settled",
+                   COUNT(*) FILTER (WHERE p.status = 'FAILED')         AS "failed",
+                   COUNT(*) FILTER (WHERE p.status = 'CANCELLED')      AS "cancelled",
+                   COUNT(*) FILTER (WHERE p.status = 'PENDING')        AS "pending"
+            FROM purchases p
+            WHERE p.created_at >= :from AND p.created_at < :to
+            GROUP BY 1
+            ORDER BY 2 DESC
+            """, nativeQuery = true)
+    List<ProviderOutcomeRow> providerOutcomes(@Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Why payments failed, commonest first.
+     *
+     * <p>Reasons come from the providers and are free text, so they are grouped
+     * as stored rather than mapped to an enum this code would have to keep in
+     * step with two payment companies. A null reason is its own bucket - a
+     * failure nobody recorded a cause for is a real category, and the honest
+     * label for it is "not stated" rather than dropping the row.
+     */
+    @Query(value = """
+            SELECT COALESCE(NULLIF(TRIM(p.failure_reason), ''), 'Not stated') AS "reason",
+                   COUNT(*)                                                   AS "failures"
+            FROM purchases p
+            WHERE p.status = 'FAILED'
+              AND p.created_at >= :from AND p.created_at < :to
+            GROUP BY 1
+            ORDER BY 2 DESC, 1
+            LIMIT 8
+            """, nativeQuery = true)
+    List<FailureReasonRow> failureReasons(@Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Payments still pending long after they should have resolved.
+     *
+     * <p>Deliberately not windowed: a stuck payment matters more the older it
+     * is, so restricting this to the chart's window would hide exactly the worst
+     * ones. This is the panel that would have caught the test-key purchase left
+     * pending against a checkout session the live account cannot see.
+     */
+    @Query(value = """
+            SELECT COUNT(*)                                                     AS "count",
+                   CAST(COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(p.created_at))) / 3600, 0) AS bigint) AS "oldestHours"
+            FROM purchases p
+            WHERE p.status = 'PENDING'
+              AND p.created_at < :before
+            """, nativeQuery = true)
+    StuckRow stuckPending(@Param("before") Instant before);
+
+    interface DailyOutcomeRow {
+        java.time.LocalDate getDate();
+        long getSettled();
+        long getFailed();
+        long getCancelled();
+        long getPending();
+    }
+
+    interface ProviderOutcomeRow {
+        String getProvider();
+        long getSettled();
+        long getFailed();
+        long getCancelled();
+        long getPending();
+    }
+
+    interface FailureReasonRow {
+        String getReason();
+        long getFailures();
+    }
+
+    interface StuckRow {
+        long getCount();
+        long getOldestHours();
+    }
+
     interface DailySignupRow {
         LocalDate getDate();
 

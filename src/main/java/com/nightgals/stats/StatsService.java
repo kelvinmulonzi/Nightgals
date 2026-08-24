@@ -1,11 +1,13 @@
 package com.nightgals.stats;
 
 import com.nightgals.stats.dto.GrowthResponse;
+import com.nightgals.stats.dto.PaymentHealthResponse;
 import com.nightgals.stats.dto.RevenueResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -23,6 +25,16 @@ public class StatsService {
 
     /** Longest window the dashboard will draw, so a stray `?days=100000` cannot scan the table. */
     public static final int MAX_DAYS = 365;
+
+    /**
+     * How old a still-pending payment has to be before it counts as stuck.
+     *
+     * <p>A day, because the slowest path here is Mobile Money waiting on a
+     * handset prompt, and that is measured in minutes. Anything still open a day
+     * later is not slow, it is broken - most often a purchase pointing at a
+     * checkout session the account can no longer see.
+     */
+    private static final int STUCK_AFTER_HOURS = 24;
 
     /** Shared zero for days nobody signed up; never mutated. */
     private static final long[] EMPTY_DAY = new long[2];
@@ -137,6 +149,90 @@ public class StatsService {
      * turns a fortnight of silence into a step the same width as a single day and
      * misreads flat as busy.
      */
+    /**
+     * How many payment attempts got through, for the last {@code days} days.
+     *
+     * <p>Windowed on when a payment was <em>started</em>, unlike revenue, which
+     * is dated by settlement. The question here is what share of attempts
+     * succeeded, and a failure only belongs to the day somebody tried.
+     *
+     * @param days how many days back to reach, clamped to 1..{@value #MAX_DAYS}
+     */
+    @Transactional(readOnly = true)
+    public PaymentHealthResponse paymentHealth(int days) {
+        int span = Math.clamp(days, 1, MAX_DAYS);
+
+        LocalDate to = LocalDate.now(ZoneOffset.UTC);
+        LocalDate from = to.minusDays(span - 1L);
+        Instant fromInstant = from.atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant toInstant = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+
+        Map<LocalDate, StatsRepository.DailyOutcomeRow> byDay = new TreeMap<>();
+        for (StatsRepository.DailyOutcomeRow row : repository.dailyOutcomes(fromInstant, toInstant)) {
+            byDay.put(row.getDate(), row);
+        }
+
+        // Every day in the window, present or not, so the client plots the array
+        // as it stands rather than reconstructing the calendar.
+        List<PaymentHealthResponse.DailyPoint> points = new ArrayList<>();
+        long settled = 0, failed = 0, cancelled = 0, pending = 0;
+        for (LocalDate day = from; !day.isAfter(to); day = day.plusDays(1)) {
+            StatsRepository.DailyOutcomeRow row = byDay.get(day);
+            long s = row == null ? 0 : row.getSettled();
+            long f = row == null ? 0 : row.getFailed();
+            long c = row == null ? 0 : row.getCancelled();
+            long p = row == null ? 0 : row.getPending();
+            settled += s; failed += f; cancelled += c; pending += p;
+            points.add(new PaymentHealthResponse.DailyPoint(day, s, f, c, p, rate(s, f)));
+        }
+
+        List<PaymentHealthResponse.ProviderHealth> providers = new ArrayList<>();
+        for (StatsRepository.ProviderOutcomeRow row : repository.providerOutcomes(fromInstant, toInstant)) {
+            long attempts = row.getSettled() + row.getFailed() + row.getCancelled() + row.getPending();
+            providers.add(new PaymentHealthResponse.ProviderHealth(
+                    row.getProvider(), attempts, row.getSettled(), row.getFailed(),
+                    row.getCancelled(), row.getPending(), rate(row.getSettled(), row.getFailed())));
+        }
+
+        List<PaymentHealthResponse.FailureReason> reasons = repository
+                .failureReasons(fromInstant, toInstant).stream()
+                .map(r -> new PaymentHealthResponse.FailureReason(r.getReason(), r.getFailures()))
+                .toList();
+
+        StatsRepository.StuckRow stuckRow = repository.stuckPending(
+                Instant.now().minus(Duration.ofHours(STUCK_AFTER_HOURS)));
+        var stuck = new PaymentHealthResponse.Stuck(
+                stuckRow == null ? 0 : stuckRow.getCount(),
+                stuckRow == null ? 0 : stuckRow.getOldestHours(),
+                STUCK_AFTER_HOURS);
+
+        var summary = new PaymentHealthResponse.Summary(
+                settled + failed + cancelled + pending,
+                settled, failed, cancelled, pending, rate(settled, failed));
+
+        return new PaymentHealthResponse(
+                from, to, summary, List.copyOf(points), List.copyOf(providers), reasons, stuck);
+    }
+
+    /**
+     * Settled as a share of everything that resolved one way or the other.
+     *
+     * <p>Cancellations are left out of both halves on purpose: somebody backing
+     * out of a card form did not fail, and counting it as one would make a
+     * hesitant week look like an outage. Pending is left out too - it has not
+     * finished, and guessing which way it will go is how a rate becomes fiction.
+     *
+     * <p>Null rather than zero when nothing resolved. A quiet day drawn as 0%
+     * is a crash that never happened.
+     */
+    private static Double rate(long settled, long failed) {
+        long resolved = settled + failed;
+        if (resolved == 0) {
+            return null;
+        }
+        return Math.round(settled * 1000.0 / resolved) / 10.0;
+    }
+
     private RevenueResponse.RevenueSeries toSeries(
             String currency,
             TreeMap<LocalDate, StatsRepository.DailyRevenueRow> rows,
