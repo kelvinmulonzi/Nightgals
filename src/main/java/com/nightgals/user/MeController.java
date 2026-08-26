@@ -42,7 +42,7 @@ public class MeController {
     @ApiResponse(responseCode = "200", description = "Account state")
     @GetMapping
     public MeResponse me(@AuthenticationPrincipal AuthUser principal) {
-        return MeResponse.of(principal.user(), profileRepository.existsByUserId(principal.id()),
+        return MeResponse.of(principal.user(), profileRepository.isCompleteForUser(principal.id()),
                 appProperties.kycRequired());
     }
 

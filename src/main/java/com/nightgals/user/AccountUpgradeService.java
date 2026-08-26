@@ -55,7 +55,7 @@ public class AccountUpgradeService {
         // than a screen.
         if (!appProperties.kycRequired()
                 && managed.getVerificationStatus() == VerificationStatus.UNVERIFIED
-                && profileRepository.existsByUserId(managed.getId())) {
+                && profileRepository.isCompleteForUser(managed.getId())) {
             managed.setVerificationStatus(VerificationStatus.APPROVED);
             log.info("Account {} approved on upgrade; identity checks are switched off",
                     managed.getId());
@@ -129,7 +129,7 @@ public class AccountUpgradeService {
     }
 
     private MeResponse me(User user) {
-        return MeResponse.of(user, profileRepository.existsByUserId(user.getId()),
+        return MeResponse.of(user, profileRepository.isCompleteForUser(user.getId()),
                 appProperties.kycRequired());
     }
 }

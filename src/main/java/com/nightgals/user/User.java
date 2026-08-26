@@ -81,6 +81,20 @@ public class User extends BaseEntity {
     @Builder.Default
     private VerificationStatus verificationStatus = VerificationStatus.UNVERIFIED;
 
+    /**
+     * When a reviewer approved this account's identity documents.
+     *
+     * <p>What the verified badge is drawn from, and deliberately not
+     * {@link #verificationStatus}. That field is the publishing gate, and while
+     * identity checks are switched off it is granted automatically the moment a
+     * profile is saved - so a badge reading it would tell viewers a document was
+     * checked when none was ever uploaded.
+     *
+     * <p>Null means no badge. Only {@code KycReviewService} sets it.
+     */
+    @Column(name = "identity_verified_at")
+    private Instant identityVerifiedAt;
+
     @Column(name = "email_verified", nullable = false)
     @Builder.Default
     private boolean emailVerified = false;
@@ -125,8 +139,20 @@ public class User extends BaseEntity {
         }
     }
 
+    /** May publish and be discovered. Not what the badge means - see below. */
     public boolean isApproved() {
         return verificationStatus == VerificationStatus.APPROVED;
+    }
+
+    /**
+     * A human checked this person's identity documents.
+     *
+     * <p>What the verified badge asks. Narrower than {@link #isApproved()}: an
+     * account can publish without ever having uploaded a document, and must not
+     * wear a badge saying otherwise.
+     */
+    public boolean isIdentityVerified() {
+        return identityVerifiedAt != null;
     }
 
     public boolean isStaff() {

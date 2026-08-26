@@ -448,7 +448,7 @@ public class AuthService {
                 user.getVerificationStatus(),
                 user.isEmailVerified(),
                 user.getTrialEndsAt(),
-                profileRepository.existsByUserId(user.getId()));
+                profileRepository.isCompleteForUser(user.getId()));
     }
 
     private String generateOpaqueToken() {

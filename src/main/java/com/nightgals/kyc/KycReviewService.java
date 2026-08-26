@@ -36,6 +36,7 @@ public class KycReviewService {
     private final UserRepository userRepository;
     private final StorageService storageService;
     private final com.nightgals.mail.EmailService emailService;
+    private final com.nightgals.config.AppProperties appProperties;
 
     @Transactional(readOnly = true)
     public PageResponse<KycReviewItemResponse> queue(Pageable pageable) {
@@ -116,7 +117,23 @@ public class KycReviewService {
         submission.setReviewedBy(reviewer);
 
         User applicant = userRepository.findById(submission.getUser().getId()).orElseThrow();
-        applicant.setVerificationStatus(approve ? VerificationStatus.APPROVED : VerificationStatus.REJECTED);
+
+        // The badge. This is the only place it is ever granted: a reviewer having
+        // looked at a document is the whole of what it claims.
+        //
+        // Cleared on rejection, including for an account that was carrying a
+        // badge granted before documents were asked for. That is the one way a
+        // badge is lost, and it takes a human actively deciding the identity does
+        // not check out - leaving it on would leave the platform asserting
+        // something a reviewer has just denied.
+        applicant.setIdentityVerifiedAt(approve ? Instant.now() : null);
+
+        // The publishing gate, and only where it is the gate. With identity
+        // checks off the account's rights came from its profile, and a rejected
+        // document should cost it the badge rather than the ability to post.
+        if (appProperties.kycRequired()) {
+            applicant.setVerificationStatus(approve ? VerificationStatus.APPROVED : VerificationStatus.REJECTED);
+        }
 
         log.info("KYC submission {} {} by {}", submissionId, approve ? "APPROVED" : "REJECTED", reviewer.getEmail());
 

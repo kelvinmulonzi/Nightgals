@@ -30,7 +30,7 @@ public record ProfileResponse(
         @Schema(description = "Owner and staff only; null on another member's profile")
         LocalDate dateOfBirth,
 
-        int age,
+        Integer age,
         Gender gender,
         String city,
         String country,
@@ -102,7 +102,10 @@ public record ProfileResponse(
                 profile.getVibe(),
                 profile.isDiscoverable(),
                 profile.getUser().getVerificationStatus(),
-                profile.getUser().getVerificationStatus() == VerificationStatus.APPROVED,
+                // The badge, not the publishing gate: an account approved
+                // automatically because identity checks are off has never had a
+                // document looked at, and must not claim it has.
+                profile.getUser().isIdentityVerified(),
                 profile.getWhatsappNumber(),
                 profilePhotoUrl,
                 profile.getCreatedAt(),

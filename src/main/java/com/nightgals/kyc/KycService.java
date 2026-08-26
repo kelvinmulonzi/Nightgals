@@ -53,14 +53,12 @@ public class KycService {
      */
     @Transactional
     public KycSubmissionResponse startOrUpdate(User user, KycSubmissionRequest request) {
-        // Nothing here has an answer when the deployment does not do identity
-        // checks: there is no queue to join, and accepting a submission would
-        // move an already-approved account back to PENDING_REVIEW and quietly
-        // strip the publishing rights it was auto-granted.
-        if (!appProperties.kycRequired()) {
-            throw ApiException.conflict("kyc_disabled",
-                    "Identity verification is not required on this platform");
-        }
+        // Open whether or not the deployment requires identity checks. When it
+        // does not, verifying is voluntary: it earns the badge and changes
+        // nothing about what the account may publish. What made this unsafe
+        // before was that submitting moved the account to PENDING_REVIEW and so
+        // stripped publishing rights it had been auto-granted - the status is
+        // now left alone unless it is actually the gate. See submitForReview.
 
         // Submitting identity documents is unambiguously creator intent.
         profileService.upgradeToCreatorIfNeeded(user);
@@ -68,7 +66,10 @@ public class KycService {
                 .orElseThrow(() -> ApiException.badRequest("profile_required",
                         "Create your profile before submitting identity documents"));
 
-        if (user.getVerificationStatus() == VerificationStatus.APPROVED) {
+        // Asked of the badge rather than the publishing gate. While identity
+        // checks are off every account with a profile is APPROVED, so testing the
+        // gate here would refuse a document from everybody who could send one.
+        if (user.isIdentityVerified()) {
             throw ApiException.conflict("already_verified", "This account is already verified");
         }
         if (submissionRepository.existsByUserIdAndStatus(user.getId(), KycStatus.PENDING_REVIEW)) {
@@ -171,7 +172,13 @@ public class KycService {
         submission.setSubmittedAt(Instant.now());
 
         User managed = userRepository.findById(user.getId()).orElseThrow();
-        managed.setVerificationStatus(VerificationStatus.PENDING_REVIEW);
+        // Only when identity checks are the publishing gate. With them off the
+        // account was approved on its profile, and moving it to PENDING_REVIEW
+        // for volunteering a document would take away publishing rights as a
+        // punishment for cooperating.
+        if (appProperties.kycRequired()) {
+            managed.setVerificationStatus(VerificationStatus.PENDING_REVIEW);
+        }
 
         log.info("KYC submission {} queued for review", submission.getId());
 
@@ -208,7 +215,11 @@ public class KycService {
         submission.setSubmittedAt(null);
 
         User managed = userRepository.findById(user.getId()).orElseThrow();
-        managed.setVerificationStatus(VerificationStatus.UNVERIFIED);
+        // Mirrors submitForReview: nothing was moved on the way in when checks
+        // are off, so there is nothing to move back.
+        if (appProperties.kycRequired()) {
+            managed.setVerificationStatus(VerificationStatus.UNVERIFIED);
+        }
 
         return KycSubmissionResponse.of(submission);
     }

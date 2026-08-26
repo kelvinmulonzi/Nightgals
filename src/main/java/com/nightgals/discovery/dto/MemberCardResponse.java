@@ -36,7 +36,7 @@ public record MemberCardResponse(
                 """, example = "/api/v1/media/9e6764e7-.../file")
         String profilePhotoUrl,
 
-        int age,
+        Integer age,
         Gender gender,
         String city,
         String country,
@@ -87,8 +87,9 @@ public record MemberCardResponse(
                 profile.getUser().getId(),
                 profile.getUser().getUsername(),
                 profile.getDisplayName(),
-                profile.getUser().getVerificationStatus()
-                        == com.nightgals.user.VerificationStatus.APPROVED,
+                // See ProfileResponse: the badge is a checked document, not an
+                // approved account.
+                profile.getUser().isIdentityVerified(),
                 profilePhotoUrl,
                 profile.getAge(),
                 profile.getGender(),

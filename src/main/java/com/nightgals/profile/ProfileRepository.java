@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,8 +17,34 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
 
     boolean existsByUserId(UUID userId);
 
+    /** Several members' profiles in one query, for pages that show many at once. */
+    List<Profile> findByUserIdIn(Collection<UUID> userIds);
+
     /**
-     * The browse feed: verified, discoverable members other than the caller.
+     * A profile with the fields that make it one.
+     *
+     * <p>Distinct from {@link #existsByUserId(UUID)}, which only asks whether a
+     * row is present - and a row can now be created by uploading a picture
+     * alone, so its presence stopped meaning the profile had been filled in.
+     * Reading it as "complete" told a creator who set a photo first that
+     * onboarding was finished, while every publishing guard still refused her.
+     */
+    @Query("""
+            SELECT COUNT(p) > 0 FROM Profile p
+            WHERE p.user.id = :userId
+              AND p.dateOfBirth IS NOT NULL
+              AND p.gender IS NOT NULL
+            """)
+    boolean isCompleteForUser(@Param("userId") UUID userId);
+
+    /**
+     * The browse feed: approved, discoverable creators other than the caller.
+     *
+     * <p>Creators explicitly, not everyone with a profile row. The feed used to
+     * lean on the fact that only creators had profiles, which stopped being true
+     * once viewers were given one to hang a picture on - and an unstated
+     * assumption that quietly turns into "every viewer is now browsable" is worth
+     * one line of SQL to close.
      *
      * <p>Ordered by <b>package rank first</b> - Black Diamond above Diamond above
      * Pro above everyone else - and only then by recency. That is what "highest
@@ -48,6 +75,7 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
             JOIN users u ON u.id = p.user_id
             WHERE u.verification_status = 'APPROVED'
               AND u.status = 'ACTIVE'
+              AND u.account_type = 'CREATOR'
               AND p.discoverable = TRUE
               AND u.id <> :viewerId
               AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
@@ -88,6 +116,7 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
             JOIN users u ON u.id = p.user_id
             WHERE u.verification_status = 'APPROVED'
               AND u.status = 'ACTIVE'
+              AND u.account_type = 'CREATOR'
               AND p.discoverable = TRUE
               AND u.id <> :viewerId
               AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
@@ -142,6 +171,7 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
             JOIN users u ON u.id = p.user_id
             WHERE u.verification_status = 'APPROVED'
               AND u.status = 'ACTIVE'
+              AND u.account_type = 'CREATOR'
               AND p.discoverable = TRUE
               AND p.city IS NOT NULL
               AND TRIM(p.city) <> ''

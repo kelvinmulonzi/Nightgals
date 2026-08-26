@@ -154,7 +154,19 @@ public class ProfileService {
     public ProfileResponse setAvatar(User user, MultipartFile file) {
         uploadValidator.validateImage(file);
 
-        Profile profile = requireProfile(user.getId());
+        // Created on demand rather than required to exist. A viewer never fills
+        // in a profile - there is no form for it and nothing on one that applies
+        // to them - so insisting on a row here is what left half the accounts on
+        // the platform with no way to set a picture.
+        //
+        // Not discoverable: this row carries an image and nothing else, and the
+        // browse feed asks for creators anyway. Both, because either alone would
+        // put a viewer in the feed the day the other changed.
+        Profile profile = profileRepository.findByUserId(user.getId())
+                .orElseGet(() -> Profile.builder()
+                        .user(user)
+                        .discoverable(user.isCreator())
+                        .build());
         String previous = profile.getAvatarStorageKey();
 
         StoredFile stored = storageService.store(file, "avatars/" + user.getId());

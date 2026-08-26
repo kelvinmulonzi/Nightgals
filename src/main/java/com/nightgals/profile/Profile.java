@@ -91,7 +91,14 @@ public class Profile extends BaseEntity {
         return avatarStorageKey != null && !avatarStorageKey.isBlank();
     }
 
-    public int getAge() {
-        return Period.between(dateOfBirth, LocalDate.now()).getYears();
+    /**
+     * Years old, or null when nobody asked.
+     *
+     * <p>A viewer's profile exists to hold a picture and carries no date of
+     * birth, so this has no answer for one. Null rather than a zero: a card that
+     * prints "0" is worse than a card that prints nothing.
+     */
+    public Integer getAge() {
+        return dateOfBirth == null ? null : Period.between(dateOfBirth, LocalDate.now()).getYears();
     }
 }

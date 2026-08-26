@@ -97,19 +97,22 @@ class KycDisabledTest {
     }
 
     @Test
-    @DisplayName("Submitting documents is refused rather than silently un-approving her")
-    void documentSubmissionIsRefused() {
+    @DisplayName("Documents are accepted without un-approving her")
+    void documentSubmissionKeepsHerApproved() {
         User member = register();
         saveProfile(member);
 
-        assertThatThrownBy(() -> kycService.startOrUpdate(reload(member), new KycSubmissionRequest(
-                DocumentType.NATIONAL_ID, "A Creator", LocalDate.of(1996, 1, 1), "CM", "12345678")))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("not required");
+        // Submitting used to be refused outright, because accepting it moved her
+        // to PENDING_REVIEW and took away rights nobody was going to give back.
+        // Verifying is now voluntary - it earns the badge - so the submission is
+        // accepted and the guarantee is kept by leaving her status alone instead.
+        var submission = kycService.startOrUpdate(reload(member), new KycSubmissionRequest(
+                DocumentType.NATIONAL_ID, "A Creator", LocalDate.of(1996, 1, 1), "CM", "12345678"));
 
-        // The point of refusing: accepting it would have moved her to
-        // PENDING_REVIEW and taken away rights nobody was going to give back.
+        assertThat(submission).isNotNull();
         assertThat(reload(member).getVerificationStatus()).isEqualTo(VerificationStatus.APPROVED);
+        // And she has not been handed a badge merely for uploading something.
+        assertThat(reload(member).isIdentityVerified()).isFalse();
     }
 
     @Test

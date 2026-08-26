@@ -103,7 +103,15 @@ public class SecurityConfig {
                         // same population the public feed already shows.
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/cities").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/profile").permitAll()
+                        // The picture that goes with the profile above. Left out when the
+                        // rest of the shop window was opened, so every avatar answered 401
+                        // to a signed-out visitor: the member list and profiles loaded, and
+                        // the faces did not. Same exposure as the profile it belongs to.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/members/*/photo").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/media").permitAll()
+                        // The video wall, same shop-window logic as the member feed:
+                        // paywalled clips come back locked and priced, never with a URL.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/videos").permitAll()
                         // What the whole gallery costs. A price is the shop window's
                         // job, and a visitor weighing up an account should see it
                         // before signing up rather than after. GET only - the POST on

@@ -54,6 +54,16 @@ public record MeResponse(
                 the client should not offer or mention verification at all.
                 """)
         boolean kycRequired,
+
+        @Schema(description = """
+                Whether a reviewer has approved this account's identity documents.
+
+                What the verified badge is drawn from, and narrower than
+                `verificationStatus`: an account can be APPROVED - and so able to
+                publish - without a document ever having been looked at, which is
+                what happens whenever `kycRequired` is false.
+                """)
+        boolean identityVerified,
         Instant lastLoginAt,
         Instant createdAt) {
 
@@ -82,6 +92,7 @@ public record MeResponse(
                 user.isApproved(),
                 nextStep(user, profileComplete, kycRequired),
                 kycRequired,
+                user.isIdentityVerified(),
                 user.getLastLoginAt(),
                 user.getCreatedAt());
     }
