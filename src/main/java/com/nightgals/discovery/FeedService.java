@@ -227,6 +227,7 @@ public class FeedService {
                     asset.getUser().getUsername(),
                     profile == null ? null : profile.getDisplayName(),
                     creatorPhoto(userId, profile, primaryPhotos),
+                    asset.getUser().isIdentityVerified(),
                     asset.getTier(),
                     unlocked ? "/api/v1/media/" + asset.getId() + "/file" : null,
                     asset.getCaption(),

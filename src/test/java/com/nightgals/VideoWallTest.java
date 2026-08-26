@@ -98,6 +98,25 @@ class VideoWallTest {
         assertThat(card.creatorPhotoUrl()).isNotNull();
     }
 
+    @Test
+    @DisplayName("The badge travels with the clip, earned or not")
+    void clipsCarryTheBadge() {
+        User unverified = creator("Amina");
+        UUID plain = video(unverified, ContentTier.FREE, null);
+        // Nobody checked her documents, so the wall must not imply somebody did.
+        assertThat(find(wall(null, null), plain).verified()).isFalse();
+
+        User checked = creator("Blaise");
+        User managed = reload(checked);
+        managed.setIdentityVerifiedAt(java.time.Instant.now());
+        userRepository.saveAndFlush(managed);
+        UUID badged = video(managed, ContentTier.FREE, null);
+
+        // The wall never loads her profile, so if the badge did not ride along
+        // there is nowhere a viewer could have learnt it.
+        assertThat(find(wall(null, null), badged).verified()).isTrue();
+    }
+
     // ---------------------------------------------------------------- filtering
 
     @Test

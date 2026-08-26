@@ -37,6 +37,13 @@ public record VideoCardResponse(
                 """)
         String creatorPhotoUrl,
 
+        @Schema(description = """
+                True when this creator's identity documents were checked by a human.
+                Carried on the clip because the wall never loads her profile - the
+                one place a viewer would otherwise have found it out.
+                """)
+        boolean verified,
+
         @Schema(description = "FREE is the shop window; EXCLUSIVE is what viewers pay for")
         ContentTier tier,
 
