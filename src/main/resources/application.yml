@@ -244,6 +244,9 @@ nightgals:
         price-minor: 5000
         duration: P7D
         max-premium-videos: 2
+        # Live reels at once. The landing strip is shared, so this is the
+        # tightest of the three limits.
+        max-reels: 1
         max-photos: 20
         live-minutes-per-day: 15
         search-priority: 1
@@ -253,6 +256,9 @@ nightgals:
         price-minor: 10000
         duration: P7D
         max-premium-videos: 5
+        # Live reels at once. The landing strip is shared, so this is the
+        # tightest of the three limits.
+        max-reels: 2
         max-photos: 40
         live-minutes-per-day: 45
         search-priority: 2
@@ -262,6 +268,9 @@ nightgals:
         price-minor: 15000
         duration: P7D
         max-premium-videos: 10
+        # Live reels at once. The landing strip is shared, so this is the
+        # tightest of the three limits.
+        max-reels: 3
         max-photos: 80
         # Two hours.
         live-minutes-per-day: 120

@@ -41,6 +41,7 @@ import java.util.UUID;
 public class ReelController {
 
     private final ReelService reelService;
+    private final com.nightgals.views.ViewCounterService viewCounter;
 
     @Operation(summary = "The reels showing right now",
             description = "Newest first. Empty when nothing is live.",
@@ -57,8 +58,17 @@ public class ReelController {
     @ApiResponse(responseCode = "404", description = "No such reel, or it has expired",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @GetMapping("/{reelId}/file")
-    public ResponseEntity<Resource> file(@PathVariable UUID reelId) {
+    public ResponseEntity<Resource> file(
+            @PathVariable UUID reelId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+            com.nightgals.user.AuthUser principal,
+            jakarta.servlet.http.HttpServletRequest request) {
         var download = reelService.download(reelId);
+        // Counted on the file, not on the strip. Every reel on the landing page
+        // requests its own bytes, so this is the moment somebody actually watched
+        // one rather than the moment the page listed it.
+        viewCounter.record(com.nightgals.views.ViewSubject.REEL, reelId,
+                com.nightgals.user.AuthUser.userOrNull(principal), download.ownerId(), request);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(
                         download.contentType() == null

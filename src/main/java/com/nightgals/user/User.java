@@ -17,6 +17,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Entity
 @Table(name = "users")
@@ -75,6 +76,26 @@ public class User extends BaseEntity {
     @Column(nullable = false, length = 20)
     @Builder.Default
     private UserStatus status = UserStatus.ACTIVE;
+
+    /**
+     * When a moderator burned this account, why, and who did it.
+     *
+     * <p>Paperwork, not the switch - {@link #status} is the switch. Kept because
+     * an account that vanished with no record of who removed it or what for is
+     * a decision nobody can review, defend or undo with any confidence.
+     *
+     * <p>Deliberately not cleared on restore: the history of an account having
+     * been burned once is exactly what a moderator wants when it comes up a
+     * second time.
+     */
+    @Column(name = "suspended_at")
+    private Instant suspendedAt;
+
+    @Column(name = "suspended_reason", length = 500)
+    private String suspendedReason;
+
+    @Column(name = "suspended_by_id")
+    private UUID suspendedById;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "verification_status", nullable = false, length = 20)

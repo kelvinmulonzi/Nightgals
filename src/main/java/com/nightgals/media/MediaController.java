@@ -52,6 +52,7 @@ import java.util.UUID;
 public class MediaController {
 
     private final MediaService mediaService;
+    private final com.nightgals.views.ViewCounterService viewCounter;
 
     @Operation(
             summary = "Upload a photo",
@@ -196,8 +197,14 @@ public class MediaController {
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @GetMapping("/media/{mediaId}/file")
     public ResponseEntity<Resource> download(@PathVariable UUID mediaId,
-                                             @AuthenticationPrincipal AuthUser principal) {
+                                             @AuthenticationPrincipal AuthUser principal,
+                                             jakarta.servlet.http.HttpServletRequest request) {
         var download = mediaService.download(mediaId, AuthUser.userOrNull(principal));
+        // The bytes, not the tile. A locked item shows a placeholder without ever
+        // reaching here, so counting this endpoint counts people who actually
+        // watched rather than people who scrolled past a thumbnail.
+        viewCounter.record(com.nightgals.views.ViewSubject.MEDIA, mediaId,
+                AuthUser.userOrNull(principal), download.ownerId(), request);
         return ResponseEntity.ok()
                 .contentType(org.springframework.http.MediaType.parseMediaType(
                         download.contentType() == null

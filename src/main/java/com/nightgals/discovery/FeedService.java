@@ -64,7 +64,7 @@ public class FeedService {
     @Transactional(readOnly = true)
     public PageResponse<MemberCardResponse> feed(User viewer, String q, String city, String gender,
                                                  Integer minAge, Integer maxAge,
-                                                 Boolean liveOnly, Boolean premiumOnly,
+                                                 Boolean liveOnly, String tier, Boolean verifiedOnly,
                                                  Pageable pageable) {
         // Swapped rather than rejected: someone dragging a range slider past
         // itself means the range, not an error page.
@@ -89,7 +89,11 @@ public class FeedService {
                 // "Live only" answered "nobody is live" whenever the people on
                 // air happened to sit past the first page of results.
                 liveOnly,
-                premiumOnly,
+                blankToNull(tier),
+                verifiedOnly,
+                // A creator who has neither a trial nor a package is not on the
+                // site, however she is searched for.
+                packageService.visibilityEnforced(),
                 pageable);
 
         List<UUID> userIds = page.getContent().stream().map(p -> p.getUser().getId()).toList();
@@ -159,6 +163,9 @@ public class FeedService {
                     freeVideoUrls,
                     lockedPhotos,
                     lockedVideos,
+                    // Both halves. The loop above has already walked every asset,
+                    // so this costs nothing extra.
+                    freeVideoUrls.size() + lockedVideos,
                     liveHosts.contains(userId),
                     followed.contains(userId),
                     cheapest,
@@ -193,7 +200,8 @@ public class FeedService {
     @Transactional(readOnly = true)
     public PageResponse<VideoCardResponse> videos(User viewer, ContentTier tier, Pageable pageable) {
         Page<MediaAsset> page = mediaRepository.findVideoFeed(
-                tier == null ? List.of(ContentTier.values()) : List.of(tier), pageable);
+                tier == null ? List.of(ContentTier.values()) : List.of(tier),
+                packageService.visibilityEnforced(), pageable);
 
         List<MediaAsset> videos = page.getContent();
         if (videos.isEmpty()) {
@@ -273,7 +281,10 @@ public class FeedService {
      */
     @Transactional(readOnly = true)
     public List<CityCountResponse> popularCities(int limit) {
-        return profileRepository.findPopularCities(Math.clamp(limit, 1, 50)).stream()
+        // Counted over exactly the population the feed draws from, this rule
+        // included - a shortcut promising 12 and delivering 3 is worse than none.
+        return profileRepository.findPopularCities(Math.clamp(limit, 1, 50),
+                        packageService.visibilityEnforced()).stream()
                 .map(row -> new CityCountResponse((String) row[0], ((Number) row[1]).longValue()))
                 .toList();
     }

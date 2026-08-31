@@ -17,6 +17,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
+
+import com.nightgals.stats.dto.AudienceResponse;
 
 /** Shapes the dashboard aggregates for the staff console. */
 @Service
@@ -25,6 +28,15 @@ public class StatsService {
 
     /** Longest window the dashboard will draw, so a stray `?days=100000` cannot scan the table. */
     public static final int MAX_DAYS = 365;
+
+    /**
+     * How many creators the audience panel names.
+     *
+     * <p>Short on purpose. A leaderboard long enough to include everybody is a
+     * list nobody reads; the point of this one is the handful at the top and
+     * whether their sales agree with their attention.
+     */
+    private static final int TOP_PROFILES = 10;
 
     /**
      * How old a still-pending payment has to be before it counts as stuck.
@@ -40,6 +52,70 @@ public class StatsService {
     private static final long[] EMPTY_DAY = new long[2];
 
     private final StatsRepository repository;
+    private final com.nightgals.views.ContentViewRepository viewRepository;
+    private final com.nightgals.profile.ProfileRepository profileRepository;
+
+
+    /**
+     * Views across profiles, videos and reels.
+     *
+     * <p>Counted from the ledger rather than off the denormalised counters on the
+     * rows: those are all-time totals, and every question a dashboard asks is
+     * "lately". The counters are for showing a creator her number; this is for
+     * seeing which way it is moving.
+     *
+     * <p>Quiet days are filled with zeroes so the result plots straight, for the
+     * same reason the revenue series does: a line that skips a day draws a slope
+     * between two points that were never adjacent.
+     *
+     * @param days how many days back to reach, clamped to 1..{@value #MAX_DAYS}
+     */
+    @Transactional(readOnly = true)
+    public AudienceResponse audience(int days) {
+        int span = Math.clamp(days, 1, MAX_DAYS);
+        LocalDate to = LocalDate.now(ZoneOffset.UTC);
+        LocalDate from = to.minusDays(span - 1L);
+
+        Map<LocalDate, long[]> byDay = new TreeMap<>();
+        for (Object[] row : viewRepository.dailyTotals(from)) {
+            LocalDate day = ((java.sql.Date) row[0]).toLocalDate();
+            String kind = (String) row[1];
+            long count = ((Number) row[2]).longValue();
+            long[] slot = byDay.computeIfAbsent(day, d -> new long[3]);
+            switch (kind) {
+                case "PROFILE" -> slot[0] += count;
+                case "MEDIA" -> slot[1] += count;
+                case "REEL" -> slot[2] += count;
+                default -> { /* a kind this build does not know about; ignore it */ }
+            }
+        }
+
+        List<AudienceResponse.DailyPoint> points = new ArrayList<>();
+        long total = 0;
+        for (LocalDate day = from; !day.isAfter(to); day = day.plusDays(1)) {
+            long[] slot = byDay.getOrDefault(day, new long[3]);
+            long dayTotal = slot[0] + slot[1] + slot[2];
+            total += dayTotal;
+            points.add(new AudienceResponse.DailyPoint(day, slot[0], slot[1], slot[2], dayTotal));
+        }
+
+        List<AudienceResponse.TopProfile> top = new ArrayList<>();
+        for (Object[] row : viewRepository.topSince("PROFILE", from, TOP_PROFILES)) {
+            UUID userId = (UUID) row[0];
+            long views = ((Number) row[1]).longValue();
+            profileRepository.findByUserId(userId).ifPresent(profile -> top.add(
+                    new AudienceResponse.TopProfile(
+                            userId,
+                            profile.getUser().getUsername(),
+                            profile.getDisplayName(),
+                            views,
+                            // Beside the views on purpose: the rows worth reading
+                            // are the ones where attention and takings disagree.
+                            repository.completedSalesFor(userId, from))));
+        }
+
+        return new AudienceResponse(from, to, total, points, top);
+    }
 
     /**
      * Settled revenue for the last {@code days} days, ending today.

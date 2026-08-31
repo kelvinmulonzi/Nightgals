@@ -71,6 +71,13 @@ public interface MediaRepository extends JpaRepository<MediaAsset, UUID> {
               AND u.status = com.nightgals.user.UserStatus.ACTIVE
               AND u.accountType = com.nightgals.user.AccountType.CREATOR
               AND EXISTS (SELECT 1 FROM Profile p WHERE p.user = u AND p.discoverable = true)
+              AND (:paidOnly = FALSE
+                   OR u.trialEndsAt > CURRENT_TIMESTAMP
+                   OR EXISTS (SELECT 1 FROM CreatorPackage cp
+                              WHERE cp.creator = u
+                                AND cp.cancelledAt IS NULL
+                                AND cp.startsAt <= CURRENT_TIMESTAMP
+                                AND cp.expiresAt > CURRENT_TIMESTAMP))
             ORDER BY m.createdAt DESC
             """,
             countQuery = """
@@ -82,8 +89,17 @@ public interface MediaRepository extends JpaRepository<MediaAsset, UUID> {
               AND m.user.status = com.nightgals.user.UserStatus.ACTIVE
               AND m.user.accountType = com.nightgals.user.AccountType.CREATOR
               AND EXISTS (SELECT 1 FROM Profile p WHERE p.user = m.user AND p.discoverable = true)
+              AND (:paidOnly = FALSE
+                   OR m.user.trialEndsAt > CURRENT_TIMESTAMP
+                   OR EXISTS (SELECT 1 FROM CreatorPackage cp
+                              WHERE cp.creator = m.user
+                                AND cp.cancelledAt IS NULL
+                                AND cp.startsAt <= CURRENT_TIMESTAMP
+                                AND cp.expiresAt > CURRENT_TIMESTAMP))
             """)
-    Page<MediaAsset> findVideoFeed(@Param("tiers") List<ContentTier> tiers, Pageable pageable);
+    Page<MediaAsset> findVideoFeed(@Param("tiers") List<ContentTier> tiers,
+                                   @Param("paidOnly") boolean paidOnly,
+                                   Pageable pageable);
 
     /**
      * The lead photo for each of several members at once.

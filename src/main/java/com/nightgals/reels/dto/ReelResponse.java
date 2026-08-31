@@ -30,6 +30,15 @@ public record ReelResponse(
         @Schema(description = "False once past expiresAt. Only ever true on the public listing.")
         boolean live,
 
+        @Schema(description = """
+                People who have watched it, all time.
+
+                A reel lasts a day, so this is the whole life of the clip rather than a
+                running total - which makes it the one number worth comparing two reels
+                by.
+                """, example = "96")
+        long viewCount,
+
         Instant createdAt) {
 
     public static ReelResponse of(Reel reel) {
@@ -43,6 +52,7 @@ public record ReelResponse(
                 reel.getCaption(),
                 reel.getExpiresAt(),
                 reel.isLive(),
+                reel.getViewCount(),
                 reel.getCreatedAt());
     }
 }

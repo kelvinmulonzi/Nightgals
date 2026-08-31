@@ -59,9 +59,25 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
      * loose match across handle, display name, city and bio - somebody typing a
      * place into the search box should find that place, not nothing.
      *
-     * <p>There is deliberately no "verified only" filter: the first line of the
-     * WHERE clause already requires APPROVED, so every row this can ever return
-     * is verified and such a filter could only ever be a no-op.
+     * <p>{@code verifiedOnly} is <em>not</em> the no-op it looks like next to the
+     * APPROVED on the first line. Those are two different facts: APPROVED is the
+     * publishing gate, and while identity checks are switched off it is granted
+     * automatically the moment a profile is saved. The badge is
+     * {@code identity_verified_at} - a document a human actually looked at - and
+     * that is what this filters on, which is also what the badge on the card
+     * means. With KYC off they diverge completely: everybody is APPROVED and
+     * almost nobody is verified.
+     *
+     * <p>{@code paidOnly} is the paid-visibility rule: with it on, a creator
+     * appears only while she is on a trial or holds a current package. It is a
+     * parameter rather than a constant because the rule follows the
+     * creator-packages switch, and SQL cannot read a Spring property - with
+     * packages off, everybody is visible and this must not quietly empty the site.
+     *
+     * <p>{@code tier} replaced a {@code premiumOnly} flag that meant "holds any
+     * package at all". There is no such thing as premium here; there are three
+     * named tiers, and a browser looking for Black Diamond was being handed
+     * everyone with a Pro subscription as well.
      *
      * <p>Age is filtered as a date range rather than by computing each row's age:
      * {@code minAge} becomes "born on or before today minus that many years", and
@@ -77,6 +93,13 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND u.status = 'ACTIVE'
               AND u.account_type = 'CREATOR'
               AND p.discoverable = TRUE
+              AND (CAST(:paidOnly AS BOOLEAN) = FALSE
+                   OR u.trial_ends_at > NOW()
+                   OR EXISTS (SELECT 1 FROM creator_packages cp
+                              WHERE cp.creator_id = u.id
+                                AND cp.cancelled_at IS NULL
+                                AND cp.starts_at <= NOW()
+                                AND cp.expires_at > NOW()))
               AND u.id <> :viewerId
               AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
               AND (CAST(:gender AS TEXT) IS NULL OR p.gender = CAST(:gender AS TEXT))
@@ -92,12 +115,16 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND (CAST(:liveOnly AS BOOLEAN) IS NULL OR CAST(:liveOnly AS BOOLEAN) = FALSE
                    OR EXISTS (SELECT 1 FROM live_sessions ls
                               WHERE ls.host_id = u.id AND ls.status = 'LIVE'))
-              AND (CAST(:premiumOnly AS BOOLEAN) IS NULL OR CAST(:premiumOnly AS BOOLEAN) = FALSE
+              AND (CAST(:tier AS TEXT) IS NULL
                    OR EXISTS (SELECT 1 FROM creator_packages cp
                               WHERE cp.creator_id = u.id
+                                AND cp.package_code = CAST(:tier AS TEXT)
                                 AND cp.cancelled_at IS NULL
                                 AND cp.starts_at <= NOW()
                                 AND cp.expires_at > NOW()))
+              AND (CAST(:verifiedOnly AS BOOLEAN) IS NULL
+                   OR CAST(:verifiedOnly AS BOOLEAN) = FALSE
+                   OR u.identity_verified_at IS NOT NULL)
             ORDER BY COALESCE((
                 SELECT MAX(CASE cp.package_code
                                WHEN 'BLACK_DIAMOND' THEN 3
@@ -118,6 +145,13 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND u.status = 'ACTIVE'
               AND u.account_type = 'CREATOR'
               AND p.discoverable = TRUE
+              AND (CAST(:paidOnly AS BOOLEAN) = FALSE
+                   OR u.trial_ends_at > NOW()
+                   OR EXISTS (SELECT 1 FROM creator_packages cp
+                              WHERE cp.creator_id = u.id
+                                AND cp.cancelled_at IS NULL
+                                AND cp.starts_at <= NOW()
+                                AND cp.expires_at > NOW()))
               AND u.id <> :viewerId
               AND (CAST(:city AS TEXT) IS NULL OR LOWER(p.city) = CAST(:city AS TEXT))
               AND (CAST(:gender AS TEXT) IS NULL OR p.gender = CAST(:gender AS TEXT))
@@ -133,12 +167,16 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND (CAST(:liveOnly AS BOOLEAN) IS NULL OR CAST(:liveOnly AS BOOLEAN) = FALSE
                    OR EXISTS (SELECT 1 FROM live_sessions ls
                               WHERE ls.host_id = u.id AND ls.status = 'LIVE'))
-              AND (CAST(:premiumOnly AS BOOLEAN) IS NULL OR CAST(:premiumOnly AS BOOLEAN) = FALSE
+              AND (CAST(:tier AS TEXT) IS NULL
                    OR EXISTS (SELECT 1 FROM creator_packages cp
                               WHERE cp.creator_id = u.id
+                                AND cp.package_code = CAST(:tier AS TEXT)
                                 AND cp.cancelled_at IS NULL
                                 AND cp.starts_at <= NOW()
                                 AND cp.expires_at > NOW()))
+              AND (CAST(:verifiedOnly AS BOOLEAN) IS NULL
+                   OR CAST(:verifiedOnly AS BOOLEAN) = FALSE
+                   OR u.identity_verified_at IS NOT NULL)
             """,
             nativeQuery = true)
     Page<Profile> findFeed(@Param("viewerId") UUID viewerId,
@@ -148,7 +186,9 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
                            @Param("minAge") Integer minAge,
                            @Param("maxAge") Integer maxAge,
                            @Param("liveOnly") Boolean liveOnly,
-                           @Param("premiumOnly") Boolean premiumOnly,
+                           @Param("tier") String tier,
+                           @Param("verifiedOnly") Boolean verifiedOnly,
+                           @Param("paidOnly") boolean paidOnly,
                            Pageable pageable);
 
     /**
@@ -173,11 +213,19 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
               AND u.status = 'ACTIVE'
               AND u.account_type = 'CREATOR'
               AND p.discoverable = TRUE
+              AND (CAST(:paidOnly AS BOOLEAN) = FALSE
+                   OR u.trial_ends_at > NOW()
+                   OR EXISTS (SELECT 1 FROM creator_packages cp
+                              WHERE cp.creator_id = u.id
+                                AND cp.cancelled_at IS NULL
+                                AND cp.starts_at <= NOW()
+                                AND cp.expires_at > NOW()))
               AND p.city IS NOT NULL
               AND TRIM(p.city) <> ''
             GROUP BY INITCAP(TRIM(p.city))
             ORDER BY total DESC, city ASC
             LIMIT :limit
             """, nativeQuery = true)
-    List<Object[]> findPopularCities(@Param("limit") int limit);
+    List<Object[]> findPopularCities(@Param("limit") int limit,
+                                     @Param("paidOnly") boolean paidOnly);
 }

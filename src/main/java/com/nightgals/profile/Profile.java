@@ -101,4 +101,17 @@ public class Profile extends BaseEntity {
     public Integer getAge() {
         return dateOfBirth == null ? null : Period.between(dateOfBirth, LocalDate.now()).getYears();
     }
+
+    /**
+     * How many people have looked at this, all time.
+     *
+     * <p>Denormalised on purpose. The alternative is a COUNT(*) over the view
+     * ledger every time this row is read, which on a page of twenty cards is
+     * twenty counts to render one number each. Kept honest by the ledger's
+     * unique index rather than by whoever writes to it - see
+     * {@link com.nightgals.views.ViewCounterService}.
+     */
+    @Column(name = "view_count", nullable = false)
+    @Builder.Default
+    private long viewCount = 0L;
 }

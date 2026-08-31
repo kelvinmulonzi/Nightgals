@@ -43,6 +43,15 @@ public record MediaResponse(
         @Schema(example = "3000") String priceDisplay,
         @Schema(example = "XAF") String currency,
 
+        @Schema(description = """
+                People who have actually watched or opened this, all time.
+
+                Counted on the file being served, not on the tile being listed - so a
+                locked item scrolled past on a wall is not a view, and the creator's own
+                looks are not either.
+                """, example = "412")
+        long viewCount,
+
         Instant createdAt) {
 
     /** Full view: the caller may fetch the bytes. */
@@ -64,6 +73,7 @@ public record MediaResponse(
                 asset.getUnlockPriceMinor(),
                 null,
                 null,
+                asset.getViewCount(),
                 asset.getCreatedAt());
     }
 
@@ -90,6 +100,7 @@ public record MediaResponse(
                 priceMinor,
                 priceDisplay,
                 currency,
+                asset.getViewCount(),
                 asset.getCreatedAt());
     }
 }

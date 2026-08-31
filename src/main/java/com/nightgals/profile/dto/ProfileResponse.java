@@ -53,6 +53,14 @@ public record ProfileResponse(
                 """, example = "/api/v1/media/9e6764e7-.../file")
         String profilePhotoUrl,
 
+        @Schema(description = """
+                People who have opened this profile, all time.
+
+                Counted once per person per day, so a refresh is not a view and neither
+                is the creator looking at her own page.
+                """, example = "1284")
+        long viewCount,
+
         Instant createdAt,
         Instant updatedAt) {
 
@@ -108,6 +116,7 @@ public record ProfileResponse(
                 profile.getUser().isIdentityVerified(),
                 profile.getWhatsappNumber(),
                 profilePhotoUrl,
+                profile.getViewCount(),
                 profile.getCreatedAt(),
                 profile.getUpdatedAt());
     }

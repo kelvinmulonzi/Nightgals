@@ -78,9 +78,9 @@ class PaywallTest {
         // "From X" is the cheapest locked thing, not the first one found.
         assertThat(card.fromPriceMinor()).isEqualTo(3_000L);
 
-        assertThat(feedService.feed(viewer, null, "douala", null, null, null, null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, null, "douala", null, null, null, null, null, null, PageRequest.of(0, 50)).content())
                 .anySatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
-        assertThat(feedService.feed(viewer, null, "Bamenda", null, null, null, null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, null, "Bamenda", null, null, null, null, null, null, PageRequest.of(0, 50)).content())
                 .noneSatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
     }
 
@@ -88,7 +88,7 @@ class PaywallTest {
     @DisplayName("The feed never shows the caller their own card")
     void feedExcludesSelf() {
         User viewer = approvedCreator();
-        assertThat(feedService.feed(viewer, null, null, null, null, null, null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, null, null, null, null, null, null, null, null, PageRequest.of(0, 50)).content())
                 .noneSatisfy(c -> assertThat(c.userId()).isEqualTo(viewer.getId()));
     }
 
@@ -119,7 +119,7 @@ class PaywallTest {
         User viewer = viewer();   // registered, never did KYC
 
         assertThat(profileService.getPublic(creator.getId(), viewer).username()).isNotBlank();
-        assertThat(feedService.feed(viewer, null, null, null, null, null, null, null, PageRequest.of(0, 50)).content())
+        assertThat(feedService.feed(viewer, null, null, null, null, null, null, null, null, PageRequest.of(0, 50)).content())
                 .anySatisfy(c -> assertThat(c.userId()).isEqualTo(creator.getId()));
 
         buy(viewer, item);
@@ -503,7 +503,7 @@ class PaywallTest {
     }
 
     private MemberCardResponse cardFor(User viewer, User creator) {
-        return feedService.feed(viewer, null, null, null, null, null, null, null, PageRequest.of(0, 50)).content().stream()
+        return feedService.feed(viewer, null, null, null, null, null, null, null, null, PageRequest.of(0, 50)).content().stream()
                 .filter(c -> c.userId().equals(creator.getId()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("creator missing from the feed"));

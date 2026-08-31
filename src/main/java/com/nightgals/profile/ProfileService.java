@@ -7,6 +7,7 @@ import com.nightgals.profile.dto.ProfileResponse;
 import com.nightgals.user.AccountType;
 import com.nightgals.user.User;
 import com.nightgals.user.UserRepository;
+import com.nightgals.user.UserStatus;
 import com.nightgals.user.VerificationStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,8 @@ public class ProfileService {
 
     private final ProfileRepository profileRepository;
     private final UserRepository userRepository;
+    private final com.nightgals.billing.CreatorPackageService packageService;
+    private final com.nightgals.billing.MediaUnlockRepository mediaUnlockRepository;
     private final AppProperties appProperties;
     private final com.nightgals.media.MediaRepository mediaRepository;
     private final com.nightgals.storage.StorageService storageService;
@@ -137,7 +140,24 @@ public class ProfileService {
         if (self || (viewer != null && viewer.isStaff())) {
             return ProfileResponse.of(profile, photo);
         }
-        if (!profile.getUser().isApproved() || !profile.isDiscoverable()) {
+        // A burned account is gone from every listing, so a profile that still
+        // answered on its own URL would leave the whole removal one shared link
+        // wide. Not-found rather than a explanatory error: whether an account
+        // was removed or never existed is nobody's business but staff's.
+        if (profile.getUser().getStatus() != UserStatus.ACTIVE
+                || !profile.getUser().isApproved() || !profile.isDiscoverable()) {
+            throw ApiException.notFound("Profile");
+        }
+        // Neither a trial nor a package: she is off the site until she buys one.
+        // The owner-or-staff branch above has already returned, so this never
+        // hides a creator from herself - she has to be able to see what the
+        // package would bring back.
+        //
+        // Anyone who has bought from her keeps the way in. Without this a viewer
+        // who paid last week can reach neither the profile nor the item, which is
+        // a refund the platform never issued.
+        if (!packageService.isPubliclyVisible(profile.getUser())
+                && !(viewer != null && mediaUnlockRepository.hasAnyFrom(viewer.getId(), targetUserId))) {
             throw ApiException.notFound("Profile");
         }
         return ProfileResponse.publicView(profile, photo);

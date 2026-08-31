@@ -78,14 +78,28 @@ public class FeedController {
             @Parameter(description = "Only members broadcasting right now")
             @RequestParam(required = false) Boolean liveOnly,
             @Parameter(description = """
-                    Only members holding a current creator package - Pro, Diamond or Black
-                    Diamond. The same standing that already lifts them up the ordering.
+                    Only members on one named package: `BLACK_DIAMOND`, `DIAMOND` or `PRO`.
+                    The same standing that already lifts them up the ordering.
+
+                    Replaces the old `premiumOnly` flag, which meant "holds any package at
+                    all" - so somebody looking for Black Diamond was handed every Pro
+                    subscriber with them. There is no premium tier in this system.
+                    """, example = "BLACK_DIAMOND")
+            @RequestParam(required = false) String tier,
+            @Parameter(description = """
+                    Only members whose identity documents a human has actually checked -
+                    the same fact the badge on the card is drawn from.
+
+                    Not implied by the feed's own APPROVED requirement: that is the
+                    publishing gate, and while identity checks are switched off it is
+                    granted automatically on saving a profile. With KYC off, everybody is
+                    approved and almost nobody is verified.
                     """)
-            @RequestParam(required = false) Boolean premiumOnly,
+            @RequestParam(required = false) Boolean verifiedOnly,
             @PageableDefault(size = 20) Pageable pageable) {
         return feedService.feed(AuthUser.userOrNull(principal), q, city,
                 gender == null ? null : gender.name(),
-                minAge, maxAge, liveOnly, premiumOnly, pageable);
+                minAge, maxAge, liveOnly, tier, verifiedOnly, pageable);
     }
 
     @Operation(

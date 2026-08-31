@@ -52,6 +52,7 @@ public class LiveSessionService {
     private final LiveQuotaService quotaService;
     private final ItemPricingService pricing;
     private final StreamProvider streamProvider;
+    private final com.nightgals.billing.CreatorPackageService packageService;
 
     // ---------------------------------------------------------------- creating
 
@@ -268,14 +269,15 @@ public class LiveSessionService {
      */
     @Transactional(readOnly = true)
     public PageResponse<LiveSessionResponse> live(User viewer, Pageable pageable) {
-        var page = sessionRepository.findLive(pageable);
+        var page = sessionRepository.findLive(packageService.visibilityEnforced(), pageable);
         return PageResponse.from(page, decorator(viewer, page.getContent()));
     }
 
     /** The calendar: what is coming up, soonest first. */
     @Transactional(readOnly = true)
     public PageResponse<LiveSessionResponse> upcoming(User viewer, Pageable pageable) {
-        var page = sessionRepository.findUpcoming(Instant.now(), pageable);
+        var page = sessionRepository.findUpcoming(Instant.now(),
+                packageService.visibilityEnforced(), pageable);
         return PageResponse.from(page, decorator(viewer, page.getContent()));
     }
 

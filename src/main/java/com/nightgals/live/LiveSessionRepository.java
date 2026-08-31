@@ -18,21 +18,38 @@ public interface LiveSessionRepository extends JpaRepository<LiveSession, UUID> 
 
     @Query("""
             SELECT s FROM LiveSession s
-            JOIN FETCH s.host
+            JOIN FETCH s.host h
             WHERE s.status = com.nightgals.live.LiveStatus.LIVE
+              AND h.status = com.nightgals.user.UserStatus.ACTIVE
+              AND (:paidOnly = FALSE
+                   OR h.trialEndsAt > CURRENT_TIMESTAMP
+                   OR EXISTS (SELECT 1 FROM CreatorPackage cp
+                              WHERE cp.creator = h
+                                AND cp.cancelledAt IS NULL
+                                AND cp.startsAt <= CURRENT_TIMESTAMP
+                                AND cp.expiresAt > CURRENT_TIMESTAMP))
             ORDER BY s.startedAt DESC
             """)
-    Page<LiveSession> findLive(Pageable pageable);
+    Page<LiveSession> findLive(@Param("paidOnly") boolean paidOnly, Pageable pageable);
 
     /** The calendar: scheduled broadcasts still to come, soonest first. */
     @Query("""
             SELECT s FROM LiveSession s
-            JOIN FETCH s.host
+            JOIN FETCH s.host h
             WHERE s.status = com.nightgals.live.LiveStatus.SCHEDULED
               AND s.scheduledFor > :now
+              AND h.status = com.nightgals.user.UserStatus.ACTIVE
+              AND (:paidOnly = FALSE
+                   OR h.trialEndsAt > CURRENT_TIMESTAMP
+                   OR EXISTS (SELECT 1 FROM CreatorPackage cp
+                              WHERE cp.creator = h
+                                AND cp.cancelledAt IS NULL
+                                AND cp.startsAt <= CURRENT_TIMESTAMP
+                                AND cp.expiresAt > CURRENT_TIMESTAMP))
             ORDER BY s.scheduledFor ASC
             """)
-    Page<LiveSession> findUpcoming(@Param("now") java.time.Instant now, Pageable pageable);
+    Page<LiveSession> findUpcoming(@Param("now") java.time.Instant now,
+                                   @Param("paidOnly") boolean paidOnly, Pageable pageable);
 
     /**
      * Scheduled broadcasts due to start soon whose followers have not been told.

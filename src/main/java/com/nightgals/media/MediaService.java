@@ -11,6 +11,8 @@ import com.nightgals.storage.StorageService;
 import com.nightgals.storage.StoredFile;
 import com.nightgals.storage.UploadValidator;
 import com.nightgals.user.User;
+import com.nightgals.user.UserRepository;
+import com.nightgals.user.UserStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
@@ -42,13 +44,41 @@ public class MediaService {
     private final EntitlementService entitlementService;
     private final CreatorPackageService creatorPackageService;
     private final ItemPricingService pricing;
+    private final UserRepository userRepository;
+    private final com.nightgals.billing.MediaUnlockRepository mediaUnlockRepository;
 
     @Transactional
     public MediaResponse upload(User user, MediaType type, MultipartFile file,
                                 String caption, ContentTier tier, Long priceMinor) {
         requireApproved(user);
         ContentTier requestedTier = tier == null ? ContentTier.EXCLUSIVE : tier;
-        creatorPackageService.requireCanPublish(user, type, requestedTier);
+
+        // Worked out before the gate below, not after, because both answers
+        // depend on it. Asking the gate about the tier the client *requested*
+        // judged the first photo as EXCLUSIVE when it is about to be forced FREE.
+        boolean firstPhoto = type == MediaType.PHOTO
+                && mediaRepository.countByUserIdAndType(user.getId(), MediaType.PHOTO) == 0;
+
+        // The first photo becomes the profile picture, and the profile picture is
+        // always free - otherwise a creator's card would have no image and nobody
+        // would have anything to judge them on.
+        ContentTier resolvedTier = firstPhoto ? ContentTier.FREE : requestedTier;
+
+        // The profile picture is not publishing, so it does not need a package.
+        //
+        // Onboarding is profile, then this photo, then the package - and the
+        // photo step used to demand the package that comes after it, which is a
+        // door locked from the far side: a new creator could not finish signing
+        // up at all unless a free trial happened to be running. It was invisible
+        // for as long as one was.
+        //
+        // Nothing about this photo is sellable. It is forced FREE here and
+        // `update` refuses to make it EXCLUSIVE for as long as it stays primary,
+        // so exempting it gives away nothing that could have been charged for.
+        // The second photo, and every video, still needs a package.
+        if (!firstPhoto) {
+            creatorPackageService.requireCanPublish(user, type, resolvedTier);
+        }
 
         if (type == MediaType.PHOTO) {
             uploadValidator.validateImage(file);
@@ -57,13 +87,6 @@ public class MediaService {
         }
 
         StoredFile stored = storageService.store(file, "media/" + user.getId());
-        boolean firstPhoto = type == MediaType.PHOTO
-                && mediaRepository.countByUserIdAndType(user.getId(), MediaType.PHOTO) == 0;
-
-        // The first photo becomes the profile picture, and the profile picture is
-        // always free - otherwise a creator's card would have no image and nobody
-        // would have anything to judge them on.
-        ContentTier resolvedTier = firstPhoto ? ContentTier.FREE : requestedTier;
 
         MediaAsset asset = MediaAsset.builder()
                 .user(user)
@@ -108,6 +131,32 @@ public class MediaService {
      */
     @Transactional(readOnly = true)
     public List<MediaResponse> listPublic(UUID targetUserId, User viewer) {
+        // A burned creator's gallery is empty to the public, however the caller
+        // arrived at it. Staff still see it - reviewing what somebody posted is
+        // usually the reason the account was burned in the first place, and a
+        // moderator who cannot look at the evidence cannot undo a bad call.
+        if (viewer == null || (!viewer.isStaff() && !viewer.getId().equals(targetUserId))) {
+            User owner = userRepository.findById(targetUserId).orElse(null);
+            boolean burned = owner == null || owner.getStatus() != UserStatus.ACTIVE;
+            boolean unpaid = owner != null && !creatorPackageService.isPubliclyVisible(owner);
+
+            // A lapsed package takes her off the site, but not away from people
+            // who already bought from her. Money changed hands for those items;
+            // withdrawing them while keeping the payment is not a paywall, it is
+            // taking something back. A buyer keeps the gallery - locked tiles and
+            // all, so what she owns is still findable - and everybody else sees
+            // nothing until the creator pays again.
+            //
+            // Being burned is different and admits no exception: that is a
+            // moderator removing content, and a purchase does not outrank it.
+            boolean bought = !burned && unpaid && viewer != null
+                    && mediaUnlockRepository.hasAnyFrom(viewer.getId(), targetUserId);
+
+            if (burned || (unpaid && !bought)) {
+                return List.of();
+            }
+        }
+
         List<MediaAsset> approved = mediaRepository
                 .findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(targetUserId, MediaStatus.APPROVED);
 
@@ -187,6 +236,20 @@ public class MediaService {
             throw ApiException.notFound("Media");
         }
 
+        // Burned means the work goes dark, not just unlisted - including for
+        // somebody who paid for it before the account was removed. Staff and the
+        // owner keep access: one to review the decision, the other because it is
+        // still her own file and a burn is not a confiscation.
+        if (!owner && !staff && asset.getUser().getStatus() != UserStatus.ACTIVE) {
+            throw ApiException.notFound("Media");
+        }
+        // Her package lapsed. The file is gone for the public, and still there for
+        // whoever paid for it - `canView` below is what decides which of the two
+        // this caller is, so a buyer is unaffected and a browser gets nothing.
+        if (!owner && !staff && !creatorPackageService.isPubliclyVisible(asset.getUser())
+                && !entitlementService.canView(viewer, asset)) {
+            throw ApiException.notFound("Media");
+        }
         if (!owner && !staff && !entitlementService.canView(viewer, asset)) {
             // Anonymous callers get 401 rather than 402: signing in is the next
             // step for them, not paying.
@@ -195,7 +258,8 @@ public class MediaService {
                     : ApiException.paymentRequired("Unlock this item to watch it");
         }
 
-        return new MediaDownload(storageService.load(asset.getStorageKey()), asset.getContentType());
+        return new MediaDownload(storageService.load(asset.getStorageKey()), asset.getContentType(),
+                asset.getUser().getId());
     }
 
     // ------------------------------------------------------------ moderation
@@ -273,6 +337,7 @@ public class MediaService {
         return asset;
     }
 
-    public record MediaDownload(Resource resource, String contentType) {
+    /** {@code ownerId} so the caller can tell a creator's own view from an audience's. */
+    public record MediaDownload(Resource resource, String contentType, UUID ownerId) {
     }
 }

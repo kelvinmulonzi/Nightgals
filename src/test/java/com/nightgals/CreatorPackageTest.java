@@ -60,6 +60,8 @@ class CreatorPackageTest {
     @Autowired BillingService billingService;
     @Autowired CreatorPackageService packageService;
     @Autowired UserRepository userRepository;
+    @Autowired com.nightgals.discovery.FeedService feedService;
+    @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager entityManager;
 
     @Test
     @DisplayName("A verified creator with no package and no trial cannot publish")
@@ -179,6 +181,94 @@ class CreatorPackageTest {
         assertThatThrownBy(() -> publishVideo(creator, ContentTier.EXCLUSIVE))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Choose a package");
+    }
+
+    @Test
+    @DisplayName("Discover filters to one named tier, not to \"has any package\"")
+    void feedFiltersByTier() {
+        User pro = approvedCreator();
+        User black = approvedCreator();
+        buy(pro, CreatorPackageCode.PRO);
+        buy(black, CreatorPackageCode.BLACK_DIAMOND);
+        backdateStarts();
+
+        // No tier asked for is everybody. Asserted first, so a feed that returns
+        // nothing at all fails here rather than looking like a broken predicate.
+        assertThat(idsIn(feed(null, null))).contains(pro.getId(), black.getId());
+
+        // The whole reason this replaced `premiumOnly`: that flag meant "holds a
+        // package", so asking for Black Diamond handed back the Pro creator too.
+        assertThat(idsIn(feed("BLACK_DIAMOND", null)))
+                .contains(black.getId())
+                .doesNotContain(pro.getId());
+
+        assertThat(idsIn(feed("PRO", null)))
+                .contains(pro.getId())
+                .doesNotContain(black.getId());
+    }
+
+    @Test
+    @DisplayName("The verified filter reads the checked document, not the publishing gate")
+    void feedFiltersByVerified() {
+        User plain = approvedCreator();
+        User checked = approvedCreator();
+        User managed = reload(checked);
+        managed.setIdentityVerifiedAt(java.time.Instant.now());
+        userRepository.saveAndFlush(managed);
+
+        // Both need a package to be on the site at all: this class runs with the
+        // trial switched off, and a creator who is neither on a trial nor paying
+        // is not in the feed for any filter to act on. Without these two lines
+        // the assertion below passes or fails for the wrong reason.
+        buy(plain, CreatorPackageCode.PRO);
+        buy(checked, CreatorPackageCode.PRO);
+        backdateStarts();
+
+        // Both are APPROVED - that is what lets them publish, and with identity
+        // checks switched off it is granted automatically. Only one of them has
+        // had a document looked at by a person, and that is what the badge and
+        // this filter both mean.
+        assertThat(idsIn(feed(null, true)))
+                .contains(checked.getId())
+                .doesNotContain(plain.getId());
+    }
+
+    /**
+     * Moves every package's start back an hour.
+     *
+     * <p>Not cosmetic. The feed's package predicate is native SQL and asks
+     * Postgres for {@code NOW()}, which is the <em>transaction's</em> start time
+     * - and this class is {@code @Transactional}, so that instant predates every
+     * row the test then writes. A package bought a millisecond ago therefore has
+     * not started yet as far as the query is concerned, and the filter matches
+     * nobody however correct it is.
+     *
+     * <p>Real requests never see this: each one is its own transaction, and the
+     * package was bought in an earlier one.
+     */
+    private void backdateStarts() {
+        entityManager.flush();
+        entityManager.createNativeQuery(
+                        "UPDATE creator_packages SET starts_at = starts_at - INTERVAL '1 hour'")
+                .executeUpdate();
+        entityManager.clear();
+    }
+
+    private java.util.List<com.nightgals.discovery.dto.MemberCardResponse> feed(
+            String tier, Boolean verifiedOnly) {
+        // The feed is a native query, and Hibernate does not auto-flush for those
+        // the way it does for JPQL that touches the same tables. Inside this
+        // class's transaction the profiles and packages just written are still
+        // sitting in the persistence context, so without this the feed reads an
+        // empty database and every assertion below passes for the wrong reason.
+        userRepository.flush();
+        return feedService.feed(null, null, null, null, null, null, null,
+                tier, verifiedOnly, org.springframework.data.domain.PageRequest.of(0, 100)).content();
+    }
+
+    private java.util.List<java.util.UUID> idsIn(
+            java.util.List<com.nightgals.discovery.dto.MemberCardResponse> cards) {
+        return cards.stream().map(com.nightgals.discovery.dto.MemberCardResponse::userId).toList();
     }
 
     @Test

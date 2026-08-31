@@ -57,16 +57,6 @@ public class ReelService {
     @Value("${nightgals.reels.lifetime:PT24H}")
     private Duration lifetime;
 
-    /**
-     * How many live reels one creator may have at a time.
-     *
-     * <p>The strip is a shared shop window on the landing page. Without a cap
-     * the creator who uploads most simply takes it, which is a worse outcome for
-     * everybody including her — a wall of one person reads as spam rather than
-     * as a directory worth browsing.
-     */
-    @Value("${nightgals.reels.max-per-creator:3}")
-    private int maxPerCreator;
 
     @Transactional
     public ReelResponse post(User creator, MultipartFile file, String caption) {
@@ -79,11 +69,18 @@ public class ReelService {
         creatorPackageService.requireActivePackage(creator);
         uploadValidator.validateVideo(file);
 
+        // The cap comes from the package now, not from one number shared by
+        // everybody: Black Diamond 3, Diamond 2, Pro 1. A flat limit made the
+        // strip the one place a Pro creator got exactly as much of the landing
+        // page as somebody paying three times as much for visibility, which is
+        // the thing the tiers are supposed to be selling.
+        int allowed = creatorPackageService.reelAllowanceFor(creator);
         long liveNow = reelRepository.countByPostedByIdAndExpiresAtAfter(creator.getId(), Instant.now());
-        if (liveNow >= maxPerCreator) {
+        if (liveNow >= allowed) {
             throw ApiException.conflict("reel_limit_reached",
-                    "You already have " + liveNow + " reels up. Each one clears itself "
-                    + "within a day, or take one down to post another.");
+                    "Your package covers " + allowed + (allowed == 1 ? " reel" : " reels")
+                    + " at a time and you have " + liveNow + " up. Each one clears itself "
+                    + "within a day — take one down to post another, or move up a package.");
         }
 
         StoredFile stored = storageService.store(file, "reels");
@@ -105,7 +102,7 @@ public class ReelService {
     /** What the public site shows. Anonymous callers included. */
     @Transactional(readOnly = true)
     public List<ReelResponse> live() {
-        return reelRepository.findByExpiresAtAfterOrderByCreatedAtDesc(Instant.now())
+        return reelRepository.findLive(Instant.now(), creatorPackageService.visibilityEnforced())
                 .stream()
                 .map(ReelResponse::of)
                 .toList();
@@ -131,7 +128,18 @@ public class ReelService {
         if (!reel.isLive()) {
             throw ApiException.notFound("Reel");
         }
-        return new ReelDownload(storageService.load(reel.getStorageKey()), reel.getContentType());
+        // Same reasoning as the expiry above, for a different clock. The strip
+        // drops a creator who is neither on a trial nor paying, and a reel is
+        // free to watch - so without this the file stays fetchable to anybody
+        // holding the link, and being off the site would mean off the listing
+        // only. Burned accounts fail the same test.
+        User poster = reel.getPostedBy();
+        if (poster.getStatus() != com.nightgals.user.UserStatus.ACTIVE
+                || !creatorPackageService.isPubliclyVisible(poster)) {
+            throw ApiException.notFound("Reel");
+        }
+        return new ReelDownload(storageService.load(reel.getStorageKey()), reel.getContentType(),
+                reel.getPostedBy().getId());
     }
 
     /** This creator's own reels, expired ones included until the sweep clears them. */
@@ -187,6 +195,7 @@ public class ReelService {
         log.info("Purged {} expired reel(s)", expired.size());
     }
 
-    public record ReelDownload(Resource resource, String contentType) {
+    /** {@code ownerId} so the caller can tell a creator's own view from an audience's. */
+    public record ReelDownload(Resource resource, String contentType, java.util.UUID ownerId) {
     }
 }

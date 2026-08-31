@@ -1,6 +1,7 @@
 package com.nightgals.stats;
 
 import com.nightgals.common.ErrorResponse;
+import com.nightgals.stats.dto.AudienceResponse;
 import com.nightgals.stats.dto.GrowthResponse;
 import com.nightgals.stats.dto.PaymentHealthResponse;
 import com.nightgals.stats.dto.RevenueResponse;
@@ -113,5 +114,29 @@ public class StatsAdminController {
             @Parameter(description = "How many days back the signup line reaches, including today. Clamped to 1-365.")
             @RequestParam(defaultValue = "30") int days) {
         return statsService.growth(days);
+    }
+
+    @Operation(
+            summary = "Views, and who is getting them",
+            description = """
+                    What people looked at, day by day, split into profiles, videos and
+                    reels — plus the ten most-viewed creators over the window with their
+                    completed sales beside them.
+
+                    Revenue answers what people paid for. This answers what they looked at,
+                    which happens first and was the half of the funnel nothing here could
+                    see. The rows worth reading are the ones where the two numbers
+                    disagree: attention without sales is a pricing problem, sales without
+                    attention is a discovery one.
+
+                    Counted once per person per day, so a refresh is not a view, and
+                    neither a creator looking at her own page nor staff working a queue
+                    is counted at all.
+                    """)
+    @GetMapping("/audience")
+    public AudienceResponse audience(
+            @Parameter(description = "How many days back to reach, 1..365") 
+            @RequestParam(defaultValue = "30") int days) {
+        return statsService.audience(days);
     }
 }

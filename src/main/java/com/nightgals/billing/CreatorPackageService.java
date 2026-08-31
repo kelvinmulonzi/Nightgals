@@ -53,6 +53,7 @@ public class CreatorPackageService {
     private static final int UNMETERED_VIDEOS = 20;
     private static final int UNMETERED_PHOTOS = 50;
     private static final int UNMETERED_LIVE_MINUTES = 240;
+    private static final int UNMETERED_REELS = 10;
 
     private final CreatorPackageRepository packageRepository;
     private final MediaRepository mediaRepository;
@@ -286,6 +287,75 @@ public class CreatorPackageService {
         return activeFor(creator.getId())
                 .map(held -> configFor(held.getPackageCode()).liveMinutesPerDay())
                 .orElseGet(() -> creator.isOnTrial() ? UNMETERED_LIVE_MINUTES : 0);
+    }
+
+    /**
+     * How many reels this creator may have showing at once.
+     *
+     * <p>Metered on the trial too, unlike photos and video, and deliberately: the
+     * reel strip is the landing page, shared with everybody, and a trial account
+     * posting into it without limit is the whole complaint this exists to answer.
+     * Trial creators get the entry allowance rather than none - they can still
+     * advertise, they just cannot take the front page.
+     *
+     * <p>Zero means she may not post at all, which is what somebody with no
+     * package and no trial left gets.
+     */
+    @Transactional(readOnly = true)
+    public int reelAllowanceFor(User creator) {
+        if (!properties.enabled()) {
+            return UNMETERED_REELS;
+        }
+        return activeFor(creator.getId())
+                .map(held -> configFor(held.getPackageCode()).maxReels())
+                .orElseGet(() -> creator.isOnTrial() ? entryReelAllowance() : 0);
+    }
+
+    /**
+     * The smallest reel allowance any package offers, which is what a trial gets.
+     *
+     * <p>Read off the configured packages rather than hard-coded, so a deployment
+     * that changes the tiers does not silently leave the trial on a number that
+     * no longer matches the cheapest thing anyone can buy.
+     */
+    private int entryReelAllowance() {
+        return properties.packages().values().stream()
+                .mapToInt(CreatorPackageProperties.Package::maxReels)
+                .filter(n -> n > 0)
+                .min()
+                .orElse(1);
+    }
+
+    /**
+     * Whether this creator's work is shown to the public at all.
+     *
+     * <p>Publishing and being published are two different gates, and until now
+     * only the first existed: a creator whose trial ran out could not post
+     * anything new, but everything she had already posted stayed on the site
+     * indefinitely. So the package bought her the right to add to a shop window
+     * that stayed open whether she paid or not.
+     *
+     * <p>Now it closes. Her profile, gallery, videos, reels and live rooms leave
+     * every public listing when she has neither a trial nor a package, and all of
+     * it comes back the moment she buys one - nothing is deleted, exactly as with
+     * a burned account.
+     *
+     * <p>The one thing this must never do is hide her from <em>herself</em>. Every
+     * caller pairs it with an owner-or-staff check: a creator who cannot see her
+     * own work has no way to understand why it vanished, and no way to value the
+     * package that brings it back.
+     */
+    @Transactional(readOnly = true)
+    public boolean isPubliclyVisible(User creator) {
+        if (!properties.enabled()) {
+            return true;
+        }
+        return creator.isOnTrial() || activeFor(creator.getId()).isPresent();
+    }
+
+    /** Whether the paid-visibility rule is switched on at all, for the SQL that cannot ask. */
+    public boolean visibilityEnforced() {
+        return properties.enabled();
     }
 
     // ---------------------------------------------------------------- internals

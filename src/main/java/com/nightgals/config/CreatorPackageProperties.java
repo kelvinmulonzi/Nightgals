@@ -57,6 +57,21 @@ public record CreatorPackageProperties(
             int maxPhotos,
 
             /**
+             * Live reels this package allows at once: 3, 2, or 1.
+             *
+             * <p>A cap on what is showing, not on how many may ever be posted -
+             * a reel clears itself within a day, so this is a limit on how much
+             * of the landing page one creator holds at a time rather than a
+             * quota she can exhaust.
+             *
+             * <p>This is the sharpest of the three tiers precisely because the
+             * strip is a shared shop window. Videos and photos live on a
+             * creator's own profile, where more of hers costs nobody else
+             * anything; a reel sits on the front page next to everyone.
+             */
+            int maxReels,
+
+            /**
              * Minutes of live broadcast per UTC day: 15, 45, or 120.
              *
              * <p>Per day, not per session. A creator can run one long stream or
@@ -80,6 +95,10 @@ public record CreatorPackageProperties(
 
         public boolean coversLive() {
             return liveMinutesPerDay > 0;
+        }
+
+        public boolean coversReels() {
+            return maxReels > 0;
         }
     }
 

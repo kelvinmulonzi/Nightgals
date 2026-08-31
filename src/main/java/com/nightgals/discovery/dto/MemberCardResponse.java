@@ -51,6 +51,17 @@ public record MemberCardResponse(
 
         @Schema(description = "Photos behind the paywall", example = "6") int lockedPhotoCount,
         @Schema(description = "Videos behind the paywall", example = "2") int lockedVideoCount,
+
+        @Schema(description = """
+                Every video on the profile, free and paid together - what the card says
+                there is to watch.
+
+                Deliberately not `lockedVideoCount`, which the card used to show: that
+                counts only what this particular caller has not paid for, so the same
+                creator advertised a different number of videos to different people, and
+                zero to anyone who had bought them all.
+                """, example = "8")
+        int videoCount,
         @Schema(description = "True if this member is broadcasting right now") boolean liveNow,
         @Schema(description = "True if the caller follows her") boolean following,
 
@@ -69,6 +80,9 @@ public record MemberCardResponse(
                 """, example = "3")
         int searchPriority,
 
+        @Schema(description = "People who have opened this profile, all time", example = "1284")
+        long viewCount,
+
         @Schema(example = "XAF") String currency) {
 
     public static MemberCardResponse of(Profile profile,
@@ -77,6 +91,7 @@ public record MemberCardResponse(
                                         List<String> freeVideoUrls,
                                         int lockedPhotoCount,
                                         int lockedVideoCount,
+                                        int videoCount,
                                         boolean liveNow,
                                         boolean following,
                                         Long fromPriceMinor,
@@ -101,11 +116,16 @@ public record MemberCardResponse(
                 freeVideoUrls,
                 lockedPhotoCount,
                 lockedVideoCount,
+                videoCount,
                 liveNow,
                 following,
                 fromPriceMinor,
                 fromPriceDisplay,
                 searchPriority,
+                // Read straight off the profile: the caller already handed us the
+                // row, so asking it to pass the number as well is one more thing
+                // to get wrong at each of the call sites.
+                profile.getViewCount(),
                 currency);
     }
 }

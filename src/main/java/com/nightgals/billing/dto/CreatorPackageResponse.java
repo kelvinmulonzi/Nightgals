@@ -26,6 +26,14 @@ public record CreatorPackageResponse(
         int maxPremiumVideos,
         @Schema(description = "Photos that may be posted at once", example = "80")
         int maxPhotos,
+        @Schema(description = """
+                Reels that may be showing at once - 3, 2 or 1.
+
+                The tightest of the three limits, because the reel strip is the landing
+                page and is shared with everybody. A creator's own videos and photos sit
+                on her profile, where more of hers costs nobody else anything.
+                """, example = "3")
+        int maxReels,
         @Schema(description = "Minutes of live broadcast per day", example = "120")
         int liveMinutesPerDay,
         @Schema(description = "Live allowance written for people, e.g. '2 hours'", example = "2 hours")
@@ -47,6 +55,7 @@ public record CreatorPackageResponse(
                 config.duration(),
                 config.maxPremiumVideos(),
                 config.maxPhotos(),
+                config.maxReels(),
                 config.liveMinutesPerDay(),
                 liveLabel(config.liveMinutesPerDay()),
                 config.searchPriority() != null ? config.searchPriority() : code.rank());

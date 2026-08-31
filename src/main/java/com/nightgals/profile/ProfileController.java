@@ -35,6 +35,7 @@ import java.util.UUID;
 public class ProfileController {
 
     private final ProfileService profileService;
+    private final com.nightgals.views.ViewCounterService viewCounter;
 
     @Operation(summary = "Get my profile")
     @ApiResponse(responseCode = "200", description = "The caller's profile")
@@ -85,9 +86,16 @@ public class ProfileController {
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     @GetMapping("/members/{userId}/profile")
     public ProfileResponse getMemberProfile(@AuthenticationPrincipal AuthUser principal,
+                                            jakarta.servlet.http.HttpServletRequest request,
                                             @Parameter(description = "The member's user id")
                                             @PathVariable UUID userId) {
-        return profileService.getPublic(userId, AuthUser.userOrNull(principal));
+        ProfileResponse profile = profileService.getPublic(userId, AuthUser.userOrNull(principal));
+        // After the profile has been resolved, never before: a view is only a
+        // view once there was something to look at, and a 404 must not be counted
+        // as interest in an account that is hidden or does not exist.
+        viewCounter.record(com.nightgals.views.ViewSubject.PROFILE, userId,
+                AuthUser.userOrNull(principal), userId, request);
+        return profile;
     }
 
     @Operation(summary = "Set my profile picture",

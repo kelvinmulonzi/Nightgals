@@ -294,4 +294,25 @@ public interface StatsRepository extends Repository<Purchase, UUID> {
 
         long getOrders();
     }
+
+    /**
+     * Completed purchases of anything belonging to one creator, since a date.
+     *
+     * <p>For the audience panel, which shows takings beside attention. Counted
+     * rather than summed: the question there is "did any of those views turn
+     * into anything", and one large sale and ten small ones answer it the same way.
+     *
+     * <p>{@code target_user_id} is the creator a purchase was for. There is no
+     * seller column on this table - a package purchase has no counterparty at all
+     * - so this counts what viewers bought *from* her, which is the number that
+     * belongs beside her views.
+     */
+    @org.springframework.data.jpa.repository.Query(value = """
+            SELECT COUNT(*) FROM purchases p
+            WHERE p.status = 'COMPLETED'
+              AND p.target_user_id = :creatorId
+              AND p.created_at >= :from
+            """, nativeQuery = true)
+    long completedSalesFor(@org.springframework.data.repository.query.Param("creatorId") java.util.UUID creatorId,
+                           @org.springframework.data.repository.query.Param("from") java.time.LocalDate from);
 }
