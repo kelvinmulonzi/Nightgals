@@ -5,8 +5,15 @@ import com.nightgals.config.MomoProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.BufferingClientHttpRequestFactory;
+import org.springframework.http.client.ClientHttpRequestExecution;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.HttpRequest;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.nio.charset.StandardCharsets;
@@ -52,7 +59,45 @@ public class MomoClient {
         // Built here rather than injected: this project pulls in webmvc without
         // the auto-configured RestClient.Builder, and a client talking to one
         // fixed host has nothing to share with the rest of the application.
-        this.http = RestClient.builder().baseUrl(properties.baseUrl()).build();
+        //
+        // Buffered so the wire log below can read a response body and still hand
+        // it to the caller. Only matters at DEBUG; the bodies here are tiny.
+        Duration timeout = properties.timeout() == null ? Duration.ofSeconds(10) : properties.timeout();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
+                java.net.http.HttpClient.newBuilder().connectTimeout(timeout).build());
+        factory.setReadTimeout(timeout);
+        this.http = RestClient.builder()
+                .baseUrl(properties.baseUrl())
+                .requestFactory(new BufferingClientHttpRequestFactory(factory))
+                .requestInterceptor(this::logExchange)
+                .build();
+    }
+
+    /**
+     * Every call to MTN and its answer, at DEBUG. Credentials never reach the log:
+     * both auth headers are masked, and so is the access token in a token response.
+     */
+    private ClientHttpResponse logExchange(HttpRequest request, byte[] body,
+                                           ClientHttpRequestExecution execution) throws java.io.IOException {
+        if (!log.isDebugEnabled()) {
+            return execution.execute(request, body);
+        }
+        HttpHeaders shown = new HttpHeaders();
+        request.getHeaders().forEach((name, values) -> shown.put(name,
+                HttpHeaders.AUTHORIZATION.equalsIgnoreCase(name)
+                        ? values.stream().map(v -> v.substring(0, Math.max(0, v.indexOf(' '))) + " ****").toList()
+                        : "Ocp-Apim-Subscription-Key".equalsIgnoreCase(name) ? java.util.List.of("****") : values));
+        log.debug("MoMo -> {} {} headers={} body={}", request.getMethod(), request.getURI(), shown,
+                body.length == 0 ? "<empty>" : new String(body, StandardCharsets.UTF_8));
+
+        long started = System.nanoTime();
+        ClientHttpResponse response = execution.execute(request, body);
+        String responseBody = StreamUtils.copyToString(response.getBody(), StandardCharsets.UTF_8)
+                .replaceAll("(\"access_token\"\\s*:\\s*\")[^\"]+", "$1****");
+        log.debug("MoMo <- {} {} {}ms body={}", response.getStatusCode().value(), request.getURI().getPath(),
+                (System.nanoTime() - started) / 1_000_000,
+                responseBody.isEmpty() ? "<empty>" : responseBody);
+        return response;
     }
 
     /**
@@ -98,6 +143,11 @@ public class MomoClient {
             log.error("MoMo requesttopay {} rejected: {} {}",
                     reference, e.getStatusCode(), e.getResponseBodyAsString());
             return false;
+        } catch (RestClientException e) {
+            // Timed out or never connected. MTN may or may not have the request;
+            // a retried checkout reuses this reference, so it cannot prompt twice.
+            log.error("MoMo requesttopay {} failed: {}", reference, e.getMessage());
+            return false;
         }
     }
 
@@ -120,6 +170,10 @@ public class MomoClient {
         } catch (RestClientResponseException e) {
             log.warn("MoMo status {} unavailable: {} {}",
                     reference, e.getStatusCode(), e.getResponseBodyAsString());
+            return java.util.Optional.empty();
+        } catch (RestClientException e) {
+            // Timed out or never connected: no answer this time, ask again next sweep.
+            log.warn("MoMo status {} unavailable: {}", reference, e.getMessage());
             return java.util.Optional.empty();
         }
     }

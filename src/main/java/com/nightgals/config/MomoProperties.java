@@ -76,5 +76,16 @@ public record MomoProperties(
          * that leaves it set bills one person for everybody else's purchases,
          * and the provider logs a warning every time it falls back.
          */
-        String sandboxPayerMsisdn) {
+        String sandboxPayerMsisdn,
+
+        /**
+         * Longest any single call to MTN may take to connect, and again to answer.
+         *
+         * <p>Without one, a call MTN never answers holds its thread forever: a
+         * checkout spins until the client gives up, and a reconciliation sweep
+         * stops chasing every other pending purchase behind it. A timed-out call
+         * is treated like MTN being unavailable - checkout says so, and the
+         * status of the purchase is simply asked for again on the next sweep.
+         */
+        Duration timeout) {
 }

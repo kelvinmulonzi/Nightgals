@@ -297,6 +297,8 @@ nightgals:
     # Must be public HTTPS, so blank on a laptop - reconciliation covers it.
     callback-url: ${MOMO_CALLBACK_URL:}
     token-refresh-margin: PT5M
+    # Per call, for connecting and again for the answer. Blank falls back to 10s.
+    timeout: ${MOMO_TIMEOUT:PT10S}
     reconcile-cron: "0 */2 * * * *"
     reconcile-window: PT1H
     # Scaffolding until viewers supply their own number at checkout. Blank this
