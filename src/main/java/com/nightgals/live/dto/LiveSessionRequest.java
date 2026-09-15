@@ -30,7 +30,9 @@ public record LiveSessionRequest(
                 daily live allowance - 15 minutes on Pro, 45 on Diamond, 2 hours on
                 Black Diamond.
                 """, example = "45")
-        @Min(1) @Max(720) Integer durationMinutes,
+        // 120: a broadcast is ended at two hours whatever was planned, so
+        // accepting a longer one would promise viewers a length it never runs.
+        @Min(1) @Max(120) Integer durationMinutes,
 
         @Schema(description = """
                 Always `EXCLUSIVE`, which is also what you get by leaving it out. Every

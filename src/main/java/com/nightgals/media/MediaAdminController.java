@@ -13,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -78,5 +80,40 @@ public class MediaAdminController {
     @PostMapping("/{mediaId}/restore")
     public MediaResponse restore(@PathVariable UUID mediaId) {
         return mediaService.restore(mediaId);
+    }
+
+    @Operation(
+            summary = "Everything one creator has posted",
+            description = """
+                    Her whole gallery as staff see it — taken-down items included, with the
+                    reason each was removed. This is the list the moderation view works
+                    from, so it must show what is hidden as well as what is live.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Her media, newest ordering first")
+    @GetMapping("/by-user/{userId}")
+    public java.util.List<MediaResponse> byUser(@PathVariable UUID userId) {
+        return mediaService.listOwn(userId);
+    }
+
+    @Operation(
+            summary = "Delete an item permanently",
+            description = """
+                    Removes the row **and the file**. This cannot be undone — prefer a takedown,
+                    which hides the item and can be reversed.
+
+                    A reason is required and the creator is emailed it. Content that vanishes
+                    with no message is indistinguishable from a bug, and somebody who is not
+                    told why cannot avoid the same removal tomorrow.
+                    """)
+    @ApiResponse(responseCode = "204", description = "Gone")
+    @ApiResponse(responseCode = "400", description = "No reason given",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @DeleteMapping("/{mediaId}")
+    public ResponseEntity<Void> deletePermanently(
+            @PathVariable UUID mediaId,
+            @Parameter(description = "Emailed to the creator", required = true)
+            @RequestParam String reason) {
+        mediaService.deleteAsAdmin(mediaId, reason);
+        return ResponseEntity.noContent().build();
     }
 }

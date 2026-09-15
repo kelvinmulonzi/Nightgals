@@ -183,12 +183,54 @@ public class LiveSessionService {
     @Transactional
     public LiveSessionResponse end(User host, UUID sessionId) {
         LiveSession session = requireOwned(host, sessionId);
+
+        // Already over - most often because the two-hour sweep got there first and
+        // her studio's End button arrived a moment later. Booking the minutes a
+        // second time would charge her allowance twice for one broadcast.
+        if (session.getStatus() == LiveStatus.ENDED) {
+            return describeForOwner(session);
+        }
+
         session.setStatus(LiveStatus.ENDED);
         session.setEndedAt(Instant.now());
 
         // Booked now, because now is when the length is known.
         quotaService.record(session);
+
+        // And the room closed at the provider. Without this the database said
+        // "ended" while LiveKit went on carrying - and billing - whatever the
+        // host's browser was still sending.
+        streamProvider.teardown(session);
         return describeForOwner(session);
+    }
+
+    /**
+     * Ends a broadcast that has run past the limit, on the host's behalf.
+     *
+     * <p>Metered at the limit, not at the moment the sweep noticed. The sweep runs
+     * once a minute, and charging a creator's allowance for the gap between her
+     * two hours running out and the job getting round to it would bill her for
+     * our scheduling rather than her broadcast.
+     *
+     * @return true when this call ended it; false when it was already over
+     */
+    @Transactional
+    public boolean endForOverrun(UUID sessionId, java.time.Duration limit) {
+        LiveSession session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null || session.getStatus() != LiveStatus.LIVE || session.getStartedAt() == null) {
+            return false;
+        }
+
+        Instant cap = session.getStartedAt().plus(limit);
+        Instant now = Instant.now();
+        session.setStatus(LiveStatus.ENDED);
+        session.setEndedAt(now.isBefore(cap) ? now : cap);
+        quotaService.record(session);
+        streamProvider.teardown(session);
+
+        log.info("Live session {} by {} ended at the {}-minute limit",
+                session.getId(), session.getHost().getId(), limit.toMinutes());
+        return true;
     }
 
     // ---------------------------------------------------------------- roster

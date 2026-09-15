@@ -22,6 +22,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,6 +50,7 @@ class ViewCountTest {
     @Autowired ViewCounterService viewCounter;
     @Autowired ProfileRepository profileRepository;
     @Autowired UserRepository userRepository;
+    @Autowired com.nightgals.stats.StatsService statsService;
 
     @Test
     @DisplayName("A visitor counts once, however many times they look")
@@ -126,6 +128,28 @@ class ViewCountTest {
         viewCounter.record(ViewSubject.PROFILE, creator.getId(), null, creator.getId(), null);
 
         assertThat(views(creator)).isZero();
+    }
+
+    @Test
+    @DisplayName("The audience dashboard builds from the same views")
+    void theAudienceDashboardReads() {
+        User creator = creator();
+        view(creator, viewer());
+        view(creator, viewer());
+
+        // This is the test that was missing. `audience()` cast a DATE column
+        // straight to java.sql.Date, and the Postgres driver hands back a
+        // LocalDate — so every request 500'd while the counting underneath it
+        // was perfectly correct. Nothing caught it because nothing called it.
+        var report = statsService.audience(30);
+
+        assertThat(report.totalViews()).isGreaterThanOrEqualTo(2);
+        // One point per day across the window, quiet days filled with zeroes.
+        assertThat(report.points()).hasSize(30);
+        assertThat(report.points().getLast().date()).isEqualTo(java.time.LocalDate.now(java.time.ZoneOffset.UTC));
+        assertThat(report.points().stream().mapToLong(p -> p.profiles()).sum()).isGreaterThanOrEqualTo(2);
+        assertThat(report.topProfiles())
+                .anySatisfy(row -> assertThat(row.userId()).isEqualTo(creator.getId()));
     }
 
     // ------------------------------------------------------------- helpers

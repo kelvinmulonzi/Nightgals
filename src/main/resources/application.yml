@@ -387,6 +387,12 @@ nightgals:
     reminder-lead-time: PT30M
     # Sweep that sends those reminders.
     reminder-cron: "0 */5 * * * *"
+    # The longest a single broadcast may run. A room left open all day bills the
+    # shared provider minutes whether or not the host is still in front of it.
+    max-session-length: ${LIVE_MAX_SESSION_LENGTH:PT2H}
+    # How often broadcasts past that limit are ended. Every minute, so a session
+    # overruns by at most a minute rather than by a whole sweep interval.
+    overrun-cron: "0 * * * * *"
 
   # Only read when live.provider is `livekit`; every bean is conditional on it,
   # so leaving this blank costs nothing.
