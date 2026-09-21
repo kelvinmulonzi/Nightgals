@@ -78,7 +78,7 @@ public class StatsService {
 
         Map<LocalDate, long[]> byDay = new TreeMap<>();
         for (Object[] row : viewRepository.dailyTotals(from)) {
-            LocalDate day = ((java.sql.Date) row[0]).toLocalDate();
+            LocalDate day = asLocalDate(row[0]);
             String kind = (String) row[1];
             long count = ((Number) row[2]).longValue();
             long[] slot = byDay.computeIfAbsent(day, d -> new long[3]);
@@ -333,5 +333,24 @@ public class StatsService {
         }
 
         return new RevenueResponse.RevenueSeries(currency, cash, gross, orders, List.copyOf(points));
+    }
+
+    /**
+     * A DATE column out of a native query, whatever the driver decided to hand back.
+     *
+     * <p>Postgres' driver returns {@link LocalDate}; older ones and other databases
+     * return {@link java.sql.Date}. The original code cast straight to the latter
+     * and threw {@code ClassCastException} on every request — a 500 on the audience
+     * dashboard that no test caught, because no test called the method that builds it.
+     */
+    private static LocalDate asLocalDate(Object value) {
+        return switch (value) {
+            case LocalDate date -> date;
+            case java.sql.Date date -> date.toLocalDate();
+            case java.sql.Timestamp stamp -> stamp.toLocalDateTime().toLocalDate();
+            case null -> throw new IllegalStateException("A grouped date column came back null");
+            default -> throw new IllegalStateException(
+                    "Unexpected date type from the driver: " + value.getClass());
+        };
     }
 }

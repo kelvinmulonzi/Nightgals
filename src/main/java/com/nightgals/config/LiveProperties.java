@@ -20,22 +20,24 @@ public record LiveProperties(
         String reminderCron,
 
         /**
-         * Longest a broadcast may stay LIVE before {@link
-         * com.nightgals.live.LiveOverrunJob} ends it without being asked to.
+         * The longest one broadcast may run before it is ended for the host.
          *
-         * <p>Nothing else ever closes a room a creator walked away from - the
-         * status stays LIVE, and whatever streaming provider is wired in keeps
-         * billing minutes, until this catches it. Six hours by default: long
-         * enough that no legitimate broadcast is cut short, short enough that a
-         * forgotten one does not run all night.
+         * <p>Two hours. Creators start a broadcast and walk away from it, and a
+         * room left open all day burns the provider minutes the whole platform
+         * shares - an absent host is billed exactly like a present one.
          */
-        Duration maxSessionLength) {
+        Duration maxSessionLength,
+
+        /** How often broadcasts past that limit are looked for. */
+        String overrunCron) {
 
     public Duration reminderLeadTime() {
         return reminderLeadTime == null ? Duration.ofMinutes(30) : reminderLeadTime;
     }
 
     public Duration maxSessionLength() {
-        return maxSessionLength == null ? Duration.ofHours(6) : maxSessionLength;
+        return maxSessionLength == null || maxSessionLength.isZero() || maxSessionLength.isNegative()
+                ? Duration.ofHours(2)
+                : maxSessionLength;
     }
 }

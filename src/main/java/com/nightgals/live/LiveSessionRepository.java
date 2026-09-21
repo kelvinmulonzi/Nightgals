@@ -68,15 +68,18 @@ public interface LiveSessionRepository extends JpaRepository<LiveSession, UUID> 
                                           @Param("to") java.time.Instant to);
 
     /**
-     * Broadcasts still LIVE well past when they should have ended - what
-     * {@link LiveOverrunJob} sweeps for. Nothing else ever closes a room a
-     * creator walked away from.
+     * Broadcasts that started at or before {@code cutoff} and are still on air.
+     *
+     * <p>Drives the overrun sweep. Every host, active or not - a burned or lapsed
+     * account's room bills exactly the same as anyone else's, so the limit has no
+     * reason to skip it.
      */
     @Query("""
             SELECT s FROM LiveSession s
             JOIN FETCH s.host
             WHERE s.status = com.nightgals.live.LiveStatus.LIVE
-              AND s.startedAt < :cutoff
+              AND s.startedAt IS NOT NULL
+              AND s.startedAt <= :cutoff
             """)
     List<LiveSession> findOverrunning(@Param("cutoff") java.time.Instant cutoff);
 

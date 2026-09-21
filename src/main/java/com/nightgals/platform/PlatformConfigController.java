@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class PlatformConfigController {
 
     private final AppProperties appProperties;
+    private final com.nightgals.config.LiveProperties liveProperties;
 
     @Schema(description = "Deployment settings that shape the sign-up journey")
     public record PlatformConfigResponse(
@@ -40,7 +41,14 @@ public class PlatformConfigController {
             boolean kycRequired,
 
             @Schema(description = "The age nobody below may register", example = "18")
-            int minimumAge) {
+            int minimumAge,
+
+            @Schema(description = """
+                    The longest one broadcast may run, in minutes, before the server ends
+                    it. Given to the client so the studio can count down to it rather than
+                    the host discovering the limit when her camera stops.
+                    """, example = "120")
+            long liveMaxMinutes) {
     }
 
     @Operation(summary = "Read the public platform settings",
@@ -48,6 +56,7 @@ public class PlatformConfigController {
     @ApiResponse(responseCode = "200", description = "The settings")
     @GetMapping
     public PlatformConfigResponse config() {
-        return new PlatformConfigResponse(appProperties.kycRequired(), appProperties.minimumAge());
+        return new PlatformConfigResponse(appProperties.kycRequired(), appProperties.minimumAge(),
+                liveProperties.maxSessionLength().toMinutes());
     }
 }

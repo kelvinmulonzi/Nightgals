@@ -45,6 +45,7 @@ public class MediaService {
     private final CreatorPackageService creatorPackageService;
     private final ItemPricingService pricing;
     private final UserRepository userRepository;
+    private final com.nightgals.mail.EmailService emailService;
     private final com.nightgals.billing.MediaUnlockRepository mediaUnlockRepository;
 
     @Transactional
@@ -341,8 +342,50 @@ public class MediaService {
         asset.setStatus(MediaStatus.REJECTED);
         asset.setRejectionReason(reason.trim());
 
+        // She is told, always. A post that disappears with no message is
+        // indistinguishable from a bug, and a creator who is not told why cannot
+        // avoid the same removal tomorrow.
+        emailService.sendContentRemoved(asset.getUser().getEmail(), asset.getUser().getUsername(),
+                describe(asset), reason.trim(), false);
+
         log.info("Media {} taken down: {}", mediaId, reason);
         return MediaResponse.of(asset);
+    }
+
+    /**
+     * Removes an item for good, at a moderator's hand.
+     *
+     * <p>Separate from {@link #delete(User, UUID)}, which is a creator deleting
+     * her own. This one needs a reason and tells her afterwards, because it is
+     * being done <em>to</em> her rather than by her.
+     *
+     * <p>The file goes with the row. Leaving the object behind would mean content
+     * a moderator removed is still sitting in storage on a URL somebody may have
+     * written down.
+     */
+    @Transactional
+    public void deleteAsAdmin(UUID mediaId, String reason) {
+        MediaAsset asset = mediaRepository.findById(mediaId)
+                .orElseThrow(() -> ApiException.notFound("Media"));
+        if (reason == null || reason.isBlank()) {
+            throw ApiException.badRequest("reason_required",
+                    "Say why this is being deleted - the creator is told, and this cannot be undone");
+        }
+
+        String email = asset.getUser().getEmail();
+        String username = asset.getUser().getUsername();
+        String what = describe(asset);
+
+        storageService.delete(asset.getStorageKey());
+        mediaRepository.delete(asset);
+
+        emailService.sendContentRemoved(email, username, what, reason.trim(), true);
+        log.warn("Media {} deleted by staff: {}", mediaId, reason);
+    }
+
+    /** "your photo" / "your clip" — enough for her to know which kind, in an email. */
+    private static String describe(MediaAsset asset) {
+        return asset.getType() == MediaType.VIDEO ? "a video" : "a photo";
     }
 
     /** Puts a taken-down item back. */

@@ -134,6 +134,38 @@ public class EmailService {
                 "The password on your " + brand + " account was changed.");
     }
 
+    /**
+     * Her post was taken down, and why.
+     *
+     * <p>Never silent, and never vague. A creator who finds a photo missing with
+     * no explanation has no way to avoid the same removal tomorrow, and no way to
+     * tell moderation from a bug. The reason a moderator typed is the whole
+     * message; everything else here is framing.
+     *
+     * <p>Says it is reversible when it is, because "removed" and "deleted" mean
+     * very different things to somebody who spent an afternoon on the picture.
+     */
+    @Async
+    public void sendContentRemoved(String to, String username, String what, String reason,
+                                   boolean permanent) {
+        String heading = permanent ? "A post of yours was deleted" : "A post of yours was taken down";
+        String body = EmailTemplates.heading(heading)
+                + EmailTemplates.paragraph("Hi " + username + ", a moderator has "
+                        + (permanent ? "deleted" : "taken down") + " one of your posts ("
+                        + what + ") on " + brand + ".")
+                + EmailTemplates.note("Reason given: " + reason)
+                + EmailTemplates.paragraph(permanent
+                        ? "This one cannot be put back. Anything else you have posted is unaffected."
+                        : "It is hidden from visitors but not deleted, and it can be put back if "
+                          + "this was a mistake.")
+                + EmailTemplates.paragraph("If you think this is wrong, reply to this email and "
+                        + "a person will look at it again.")
+                + EmailTemplates.button("Open my studio", properties.appBaseUrl() + "/me/media");
+
+        sendQuietly(to, heading + " on " + brand, body,
+                heading + ". Reason: " + reason);
+    }
+
     /** Sent once the address is confirmed. */
     @Async
     public void sendWelcome(String to, String username, boolean creator) {

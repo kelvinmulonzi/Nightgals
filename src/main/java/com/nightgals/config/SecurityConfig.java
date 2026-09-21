@@ -1,5 +1,4 @@
 package com.nightgals.config;
-
 import com.nightgals.auth.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;

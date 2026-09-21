@@ -172,6 +172,98 @@ public class LiveKitStreamProvider implements StreamProvider {
                 .compact();
     }
 
+    /**
+     * Closes the room, which disconnects everybody in it.
+     *
+     * <p>This is what actually stops the provider billing. Marking a session
+     * ENDED in our database changes nothing at LiveKit: the host's browser keeps
+     * publishing and every viewer stays subscribed, and those minutes are charged
+     * whether anybody is watching or not. Before this existed, pressing "End" and
+     * walking away looked identical to LiveKit.
+     *
+     * <p>Plain HTTP against LiveKit's Twirp endpoint rather than an SDK, the same
+     * way tokens are plain JWTs - one POST is the whole protocol.
+     *
+     * <p>Never throws. A room that is already gone is the outcome we wanted, and a
+     * provider that is briefly unreachable must not stop a session being marked
+     * over; the host's own client disconnects when it notices, and LiveKit closes
+     * an empty room on its own shortly after.
+     */
+    @Override
+    public void teardown(LiveSession session) {
+        String room = roomOf(session);
+        try {
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(httpBase() + "/twirp/livekit.RoomService/DeleteRoom"))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + adminToken())
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString("{\"room\":\"" + room + "\"}"))
+                    .build();
+            java.net.http.HttpResponse<String> response =
+                    HTTP.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            int code = response.statusCode();
+            if (code / 100 == 2) {
+                log.info("LiveKit room {} closed", room);
+            } else if (code == 404 || response.body().contains("not_found")) {
+                // Nobody was ever in it, or LiveKit already reaped it. Either way it
+                // is closed, which is all this was for.
+                log.debug("LiveKit room {} was already gone", room);
+            } else {
+                log.warn("LiveKit refused to close room {}: {} {}", room, code, response.body());
+            }
+        } catch (java.io.IOException e) {
+            log.warn("Could not reach LiveKit to close room {}: {}", room, e.toString());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted closing LiveKit room {}", room);
+        }
+    }
+
+    private static final java.net.http.HttpClient HTTP = java.net.http.HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
+
+    /**
+     * The API's address for server calls.
+     *
+     * <p>Configured as the {@code wss://} address clients connect to; the same host
+     * answers HTTPS for administration, so only the scheme changes.
+     */
+    private String httpBase() {
+        String url = properties.url().trim();
+        if (url.endsWith("/")) {
+            url = url.substring(0, url.length() - 1);
+        }
+        if (url.startsWith("wss://")) {
+            return "https://" + url.substring("wss://".length());
+        }
+        if (url.startsWith("ws://")) {
+            return "http://" + url.substring("ws://".length());
+        }
+        return url;
+    }
+
+    /**
+     * A token for managing rooms, not for joining one.
+     *
+     * <p>Only {@code roomCreate}, which is the grant DeleteRoom checks. Short-lived
+     * because it is used once, immediately, from this process.
+     */
+    private String adminToken() {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .issuer(properties.apiKey())
+                .subject("nightgals-server")
+                .issuedAt(Date.from(now))
+                .notBefore(Date.from(now))
+                .expiration(Date.from(now.plus(Duration.ofMinutes(2))))
+                .claim("video", Map.of("roomCreate", true))
+                .signWith(signingKey)
+                .compact();
+    }
+
     /** One room per broadcast, named for it so the two can never be confused. */
     private static String roomOf(LiveSession session) {
         return "live-" + session.getId();
