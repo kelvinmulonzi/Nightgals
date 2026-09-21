@@ -128,33 +128,17 @@ public class MediaService {
      *
      * <p>Public: {@code viewer} is null for anonymous callers, who are never
      * entitled and therefore always see the preview-only view.
+     *
+     * <p>Whole rather than paged - kept as the simple form for staff tooling and
+     * anything else that genuinely wants everything at once. {@link
+     * #galleryPage} is what {@code GET /members/{userId}/media} actually calls;
+     * the two share {@link #galleryVisible} so the "is this gallery visible to
+     * this viewer at all" rule is written once.
      */
     @Transactional(readOnly = true)
     public List<MediaResponse> listPublic(UUID targetUserId, User viewer) {
-        // A burned creator's gallery is empty to the public, however the caller
-        // arrived at it. Staff still see it - reviewing what somebody posted is
-        // usually the reason the account was burned in the first place, and a
-        // moderator who cannot look at the evidence cannot undo a bad call.
-        if (viewer == null || (!viewer.isStaff() && !viewer.getId().equals(targetUserId))) {
-            User owner = userRepository.findById(targetUserId).orElse(null);
-            boolean burned = owner == null || owner.getStatus() != UserStatus.ACTIVE;
-            boolean unpaid = owner != null && !creatorPackageService.isPubliclyVisible(owner);
-
-            // A lapsed package takes her off the site, but not away from people
-            // who already bought from her. Money changed hands for those items;
-            // withdrawing them while keeping the payment is not a paywall, it is
-            // taking something back. A buyer keeps the gallery - locked tiles and
-            // all, so what she owns is still findable - and everybody else sees
-            // nothing until the creator pays again.
-            //
-            // Being burned is different and admits no exception: that is a
-            // moderator removing content, and a purchase does not outrank it.
-            boolean bought = !burned && unpaid && viewer != null
-                    && mediaUnlockRepository.hasAnyFrom(viewer.getId(), targetUserId);
-
-            if (burned || (unpaid && !bought)) {
-                return List.of();
-            }
+        if (!galleryVisible(targetUserId, viewer)) {
+            return List.of();
         }
 
         List<MediaAsset> approved = mediaRepository
@@ -164,13 +148,74 @@ public class MediaService {
         var viewable = entitlementService.viewableAmong(viewer, approved);
 
         return approved.stream()
-                .map(asset -> viewable.contains(asset.getId())
-                        ? MediaResponse.of(asset)
-                        // Locked tiles still carry their price: that is what turns a
-                        // blurred placeholder into something somebody buys.
-                        : MediaResponse.locked(asset, pricing.priceOf(asset),
-                                pricing.display(pricing.priceOf(asset)), pricing.currency()))
+                .map(asset -> toResponse(asset, viewable))
                 .toList();
+    }
+
+    /**
+     * The same gallery, one page at a time - what the public profile actually
+     * calls.
+     *
+     * <p>Paged rather than returned whole: a creator active for a year can post
+     * thousands of items, and a profile that fetches all of them on every visit
+     * is a query and a payload that only grows. {@code pageable} is what the
+     * client's "load more" advances.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<MediaResponse> galleryPage(UUID targetUserId, User viewer, Pageable pageable) {
+        if (!galleryVisible(targetUserId, viewer)) {
+            return new PageResponse<>(List.of(), pageable.getPageNumber(), pageable.getPageSize(), 0, 0, true);
+        }
+
+        var approved = mediaRepository
+                .findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(targetUserId, MediaStatus.APPROVED, pageable);
+
+        // One query for the whole page rather than one per tile.
+        var viewable = entitlementService.viewableAmong(viewer, approved.getContent());
+
+        return PageResponse.from(approved, asset -> toResponse(asset, viewable));
+    }
+
+    private MediaResponse toResponse(MediaAsset asset, java.util.Set<UUID> viewable) {
+        return viewable.contains(asset.getId())
+                ? MediaResponse.of(asset)
+                // Locked tiles still carry their price: that is what turns a
+                // blurred placeholder into something somebody buys.
+                : MediaResponse.locked(asset, pricing.priceOf(asset),
+                        pricing.display(pricing.priceOf(asset)), pricing.currency());
+    }
+
+    /**
+     * Whether {@code targetUserId}'s gallery is shown to {@code viewer} at all -
+     * shared by {@link #listPublic} and {@link #galleryPage} so the rule is
+     * written once.
+     */
+    private boolean galleryVisible(UUID targetUserId, User viewer) {
+        // A burned creator's gallery is empty to the public, however the caller
+        // arrived at it. Staff still see it - reviewing what somebody posted is
+        // usually the reason the account was burned in the first place, and a
+        // moderator who cannot look at the evidence cannot undo a bad call.
+        if (viewer != null && (viewer.isStaff() || viewer.getId().equals(targetUserId))) {
+            return true;
+        }
+
+        User owner = userRepository.findById(targetUserId).orElse(null);
+        boolean burned = owner == null || owner.getStatus() != UserStatus.ACTIVE;
+        boolean unpaid = owner != null && !creatorPackageService.isPubliclyVisible(owner);
+
+        // A lapsed package takes her off the site, but not away from people who
+        // already bought from her. Money changed hands for those items;
+        // withdrawing them while keeping the payment is not a paywall, it is
+        // taking something back. A buyer keeps the gallery - locked tiles and
+        // all, so what she owns is still findable - and everybody else sees
+        // nothing until the creator pays again.
+        //
+        // Being burned is different and admits no exception: that is a
+        // moderator removing content, and a purchase does not outrank it.
+        boolean bought = !burned && unpaid && viewer != null
+                && mediaUnlockRepository.hasAnyFrom(viewer.getId(), targetUserId);
+
+        return !burned && (!unpaid || bought);
     }
 
     @Transactional

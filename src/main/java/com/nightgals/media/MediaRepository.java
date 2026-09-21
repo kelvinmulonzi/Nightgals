@@ -25,6 +25,16 @@ public interface MediaRepository extends JpaRepository<MediaAsset, UUID> {
 
     List<MediaAsset> findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(UUID userId, MediaStatus status);
 
+    /**
+     * The same gallery, one page at a time.
+     *
+     * <p>A creator with a large gallery made {@link #findByUserIdAndStatusOrderByPositionAscCreatedAtAsc}
+     * worth paging rather than returning in one call - see
+     * {@link MediaService#listPublic(UUID, com.nightgals.user.User, Pageable)}.
+     */
+    Page<MediaAsset> findByUserIdAndStatusOrderByPositionAscCreatedAtAsc(
+            UUID userId, MediaStatus status, Pageable pageable);
+
     /** Everything this member has posted, whatever its type or state. */
     long countByUserId(UUID userId);
 

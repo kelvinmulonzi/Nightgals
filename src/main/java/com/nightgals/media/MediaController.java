@@ -1,6 +1,7 @@
 package com.nightgals.media;
 
 import com.nightgals.common.ErrorResponse;
+import com.nightgals.common.PageResponse;
 import com.nightgals.media.ContentTier;
 import com.nightgals.media.dto.MediaResponse;
 import com.nightgals.media.dto.MediaUpdateRequest;
@@ -14,6 +15,8 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.core.io.Resource;
@@ -168,13 +171,17 @@ public class MediaController {
                     so a client can show blurred placeholders and a truthful count of what
                     unlocking would reveal. Sign in and unlock with
                     `POST /api/v1/billing/unlocks/{userId}`, or take out a subscription.
+
+                    Paged, ordered the way the creator arranged her gallery. Omit `page` for
+                    the first one; `last: true` on the response is when to stop asking.
                     """,
             security = @SecurityRequirement(name = ""))
-    @ApiResponse(responseCode = "200", description = "That member's media, locked items included")
+    @ApiResponse(responseCode = "200", description = "A page of that member's media, locked items included")
     @GetMapping("/members/{userId}/media")
-    public List<MediaResponse> listForMember(@PathVariable UUID userId,
-                                             @AuthenticationPrincipal AuthUser principal) {
-        return mediaService.listPublic(userId, AuthUser.userOrNull(principal));
+    public PageResponse<MediaResponse> listForMember(@PathVariable UUID userId,
+                                                      @AuthenticationPrincipal AuthUser principal,
+                                                      @PageableDefault(size = 30) Pageable pageable) {
+        return mediaService.galleryPage(userId, AuthUser.userOrNull(principal), pageable);
     }
 
     @Operation(summary = "Fetch the bytes of a media item",
