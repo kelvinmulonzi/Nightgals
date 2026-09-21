@@ -87,13 +87,14 @@ class ExpiredTrialWebTest {
         mockMvc.perform(get("/api/v1/members/{id}/media", creator.getId())
                         .header("Authorization", expiredBearer))
                 .andExpect(status().isOk())
-                // The free preview opens; the clip she is selling does not.
-                .andExpect(jsonPath("$[?(@.tier == 'EXCLUSIVE')].locked").value(true))
-                .andExpect(jsonPath("$[?(@.tier == 'EXCLUSIVE')].priceMinor").value(9000))
+                // Paged now, like /api/v1/videos below - the free preview opens;
+                // the clip she is selling does not.
+                .andExpect(jsonPath("$.content[?(@.tier == 'EXCLUSIVE')].locked").value(true))
+                .andExpect(jsonPath("$.content[?(@.tier == 'EXCLUSIVE')].priceMinor").value(9000))
                 // Absent, not null: the serialiser drops empty fields, so there is
                 // no key to read rather than a key reading null. Either way there
                 // is nothing to fetch.
-                .andExpect(jsonPath("$[?(@.tier == 'EXCLUSIVE')].url").doesNotExist());
+                .andExpect(jsonPath("$.content[?(@.tier == 'EXCLUSIVE')].url").doesNotExist());
     }
 
     @Test

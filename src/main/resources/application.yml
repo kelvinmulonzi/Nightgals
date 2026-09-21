@@ -424,6 +424,15 @@ nightgals:
     reminder-lead-time: PT30M
     # Sweep that sends those reminders.
     reminder-cron: "0 */5 * * * *"
+    # Longest a broadcast may stay LIVE before it is ended automatically.
+    # Nothing else ever closes a room a creator walked away from - the status
+    # stays LIVE, and the streaming provider keeps billing minutes, until this
+    # catches it. Six hours is long enough that no legitimate broadcast is cut
+    # short.
+    max-session-length: ${LIVE_MAX_SESSION_LENGTH:PT6H}
+    # Sweep that ends them. Every minute, since an hour of extra billing for a
+    # forgotten broadcast is a worse failure than a sweep that runs often.
+    overrun-cron: "0 * * * * *"
 
   # Only read when live.provider is `livekit`; every bean is conditional on it,
   # so leaving this blank costs nothing.

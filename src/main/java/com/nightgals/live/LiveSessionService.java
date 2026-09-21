@@ -191,6 +191,31 @@ public class LiveSessionService {
         return describeForOwner(session);
     }
 
+    /**
+     * Ends a broadcast because it has run past {@link
+     * com.nightgals.config.LiveProperties#maxSessionLength()}, not because its
+     * host asked to stop it. {@link LiveOverrunJob} is the only caller.
+     *
+     * <p>Skips {@link #requireOwned} on purpose: there is no host acting here,
+     * only a sweep that already found this session past its limit by querying
+     * for it directly. Silently returns rather than throwing when the session
+     * is no longer LIVE - its host may have ended it herself between the sweep
+     * finding it and this call reaching it, which is not a failure worth
+     * logging as one.
+     */
+    @Transactional
+    public void endForOverrun(UUID sessionId, java.time.Duration limit) {
+        LiveSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> ApiException.notFound("Live session"));
+        if (session.getStatus() != LiveStatus.LIVE) {
+            return;
+        }
+        session.setStatus(LiveStatus.ENDED);
+        session.setEndedAt(Instant.now());
+        quotaService.record(session);
+        log.info("Live session {} ended automatically after running past {}", sessionId, limit);
+    }
+
     // ---------------------------------------------------------------- roster
 
     /**

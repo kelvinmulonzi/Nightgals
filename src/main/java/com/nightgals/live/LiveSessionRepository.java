@@ -67,6 +67,19 @@ public interface LiveSessionRepository extends JpaRepository<LiveSession, UUID> 
     List<LiveSession> findNeedingReminder(@Param("from") java.time.Instant from,
                                           @Param("to") java.time.Instant to);
 
+    /**
+     * Broadcasts still LIVE well past when they should have ended - what
+     * {@link LiveOverrunJob} sweeps for. Nothing else ever closes a room a
+     * creator walked away from.
+     */
+    @Query("""
+            SELECT s FROM LiveSession s
+            JOIN FETCH s.host
+            WHERE s.status = com.nightgals.live.LiveStatus.LIVE
+              AND s.startedAt < :cutoff
+            """)
+    List<LiveSession> findOverrunning(@Param("cutoff") java.time.Instant cutoff);
+
     /** Drives the "live now" dot on feed cards, one query per page. */
     @Query("""
             SELECT s.host.id FROM LiveSession s
