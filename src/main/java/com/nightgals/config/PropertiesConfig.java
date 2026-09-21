@@ -9,6 +9,6 @@ import org.springframework.context.annotation.Configuration;
         NotificationProperties.class, CreatorPackageProperties.class,
         CallProperties.class, LiveProperties.class, MomoProperties.class,
         StripeProperties.class, GiftProperties.class, LiveKitProperties.class,
-        GoogleProperties.class})
+        GoogleProperties.class, OrangeProperties.class})
 public class PropertiesConfig {
 }

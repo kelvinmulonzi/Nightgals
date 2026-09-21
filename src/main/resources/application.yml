@@ -161,6 +161,8 @@ nightgals:
     # list rather than a switch:
     #
     # momo   MTN Mobile Money. A prompt goes to the payer's handset.
+    # orange Orange Money. A prompt goes to the payer's handset. Needs
+    #        ORANGE_CLIENT_ID/SECRET/STATIC_AUTH_TOKEN/CHANNEL_MSISDN/CHANNEL_PIN.
     # stripe Cards, on a Stripe-hosted page. Needs STRIPE_SECRET_KEY.
     # manual purchases stay PENDING until a human settles them.
     # auto   every purchase completes instantly and NOTHING IS COLLECTED. The
@@ -304,6 +306,41 @@ nightgals:
     # Scaffolding until viewers supply their own number at checkout. Blank this
     # before production or one person is billed for everyone else's purchases.
     sandbox-payer-msisdn: ${MOMO_SANDBOX_PAYER_MSISDN:}
+
+  # Orange Money Cameroun (OMAPI). Only wired in when `orange` is one of
+  # monetization.providers above; every bean in com.nightgals.billing.orange is
+  # conditional on it, so leaving it out costs nothing.
+  #
+  # A push, same shape as MTN: a prompt goes to the payer's own handset and
+  # approval is a later, separate event. Two things differ from MTN, though -
+  # starting a payment is mp/init then mp/pay, two calls not one, and every
+  # call needs BOTH a dynamic OAuth2 bearer token (client-id/client-secret,
+  # from the developer portal - Guide_Utilisateur_OMAPI section 1.6) AND the
+  # static-auth-token issued once by Orange over email during onboarding.
+  # Missing either fails the call the same way.
+  orange:
+    base-url: ${ORANGE_BASE_URL:https://api-s1.orange.cm}
+    client-id: ${ORANGE_CLIENT_ID:}
+    client-secret: ${ORANGE_CLIENT_SECRET:}
+    # Not rotated by this application, unlike the bearer token above - it is
+    # whatever Orange emailed at onboarding, verbatim.
+    static-auth-token: ${ORANGE_STATIC_AUTH_TOKEN:}
+    # This merchant's own Orange Money number and PIN - the "channel" - sent on
+    # every mp/pay call. Never the payer's own; that is subscriberMsisdn,
+    # collected the same way MTN's payer number is.
+    channel-user-msisdn: ${ORANGE_CHANNEL_MSISDN:}
+    channel-pin: ${ORANGE_CHANNEL_PIN:}
+    # Sent per-request as notifUrl rather than registered once. Must be public
+    # HTTPS, so blank on a laptop - reconciliation covers it.
+    notif-url: ${ORANGE_NOTIF_URL:}
+    token-refresh-margin: PT5M
+    # Per call, for connecting and again for the answer. Blank falls back to 10s.
+    timeout: ${ORANGE_TIMEOUT:PT10S}
+    reconcile-cron: "0 */2 * * * *"
+    reconcile-window: PT1H
+    # Scaffolding until viewers supply their own number at checkout. Blank this
+    # before production or one person is billed for everyone else's purchases.
+    sandbox-payer-msisdn: ${ORANGE_SANDBOX_PAYER_MSISDN:}
 
   # Cards, through Stripe's hosted Checkout. Only wired in when `stripe` is one
   # of monetization.providers above; every bean in com.nightgals.billing.stripe

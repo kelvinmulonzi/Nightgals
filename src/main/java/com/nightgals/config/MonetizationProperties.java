@@ -36,8 +36,9 @@ public record MonetizationProperties(
          *
          * <p>More than one runs at a time and the buyer chooses per checkout, so
          * this is a list rather than a switch. Known values are {@code momo},
-         * {@code stripe}, {@code manual} and {@code auto} - the last two being
-         * pre-launch scaffolding, and {@code auto} collecting no money at all.
+         * {@code orange}, {@code stripe}, {@code manual} and {@code auto} - the
+         * last two being pre-launch scaffolding, and {@code auto} collecting no
+         * money at all.
          *
          * <p>Read by {@link com.nightgals.billing.PaymentProviderCondition} at bean
          * registration time as well as here, so a method left out of this list has
