@@ -354,8 +354,14 @@ public class LiveSessionService {
         return streamProvider.publishCredentials(session, host);
     }
 
-    /** The shared gate: entitled, or a co-host on the roster. */
-    private LiveSession requireJoinable(UUID sessionId, User viewer) {
+    /**
+     * The shared gate: entitled, or a co-host on the roster.
+     *
+     * <p>Package-private rather than private: {@link LiveChatService} reuses it
+     * so that being able to chat and being able to watch are exactly the same
+     * check, never two gates that can drift apart.
+     */
+    LiveSession requireJoinable(UUID sessionId, User viewer) {
         LiveSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> ApiException.notFound("Live session"));
 

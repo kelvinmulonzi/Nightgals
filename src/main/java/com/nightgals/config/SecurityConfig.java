@@ -138,6 +138,12 @@ public class SecurityConfig {
                         // handles and amounts - the same things the room shows. Sending
                         // one is a POST and stays authenticated: it spends a balance.
                         .requestMatchers(HttpMethod.GET, "/api/v1/live/*/gifts").permitAll()
+                        // Chat on that broadcast - open on the same terms as /watch, not
+                        // as /gifts: unlike the gift ticker, chat is said inside a room
+                        // that is paid to join, so an anonymous or unentitled caller gets
+                        // LiveChatService's own 401/402 here rather than Spring's. Sending
+                        // a message is a POST and stays authenticated.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/live/*/chat").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/*/call-rates").permitAll()
                         // Without this the preview URLs above would be dead links.
                         // MediaService still refuses anything past the free preview.

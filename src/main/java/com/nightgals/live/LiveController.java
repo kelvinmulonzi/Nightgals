@@ -5,6 +5,8 @@ import com.nightgals.common.PageResponse;
 import com.nightgals.billing.BillingService;
 import com.nightgals.billing.dto.CheckoutResponse;
 import com.nightgals.config.MonetizationProperties;
+import com.nightgals.live.dto.ChatFeedResponse;
+import com.nightgals.live.dto.ChatMessageResponse;
 import com.nightgals.live.dto.ExtendLiveRequest;
 import com.nightgals.live.dto.GiftFeedResponse;
 import com.nightgals.live.dto.GiftHistoryResponse;
@@ -14,6 +16,7 @@ import com.nightgals.live.dto.GiftResponse;
 import com.nightgals.live.dto.LiveAllowanceResponse;
 import com.nightgals.live.dto.LiveSessionRequest;
 import com.nightgals.live.dto.LiveSessionResponse;
+import com.nightgals.live.dto.SendChatMessageRequest;
 import com.nightgals.live.dto.SendGiftRequest;
 import com.nightgals.live.dto.StreamCredentialsResponse;
 import com.nightgals.user.AuthUser;
@@ -75,6 +78,7 @@ public class LiveController {
     private final LiveQuotaService liveQuotaService;
     private final BillingService billingService;
     private final GiftService giftService;
+    private final LiveChatService liveChatService;
     private final MonetizationProperties monetization;
 
     @Operation(summary = "Announce or start a broadcast",
@@ -398,6 +402,57 @@ public class LiveController {
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant since) {
         return giftService.feed(sessionId, since);
+    }
+
+    // ------------------------------------------------------------------- chat
+
+    @Operation(summary = "Say something in a broadcast's chat",
+            description = """
+                    Access is exactly `/watch`'s: 401 to a stranger, 402 to a member who has
+                    not bought this broadcast. A co-host and the host herself get in without
+                    paying, the same as watching.
+
+                    Refused with 409 `not_live` once the broadcast has ended - there is no
+                    longer an audience to say it to.
+                    """,
+            security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponse(responseCode = "200", description = "Posted, and now visible on the broadcast")
+    @ApiResponse(responseCode = "402", description = "Host not unlocked",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "No such broadcast",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "409", description = "`not_live`",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @PostMapping("/live/{sessionId}/chat")
+    public ChatMessageResponse sendChatMessage(@PathVariable UUID sessionId,
+                                               @AuthenticationPrincipal AuthUser principal,
+                                               @Valid @RequestBody SendChatMessageRequest request) {
+        return liveChatService.send(principal.user(), sessionId, request.body());
+    }
+
+    @Operation(summary = "Chat messages sent to a broadcast",
+            description = """
+                    Polled by the viewer's client, the same way as `GET /live/{sessionId}/gifts` -
+                    omit `since` on the first call for the last 50 messages, then send back
+                    the `until` from the previous response each time after.
+
+                    Gated the same as `/watch`, unlike the gift feed: chat is said inside the
+                    room, not a public ticker, so reading it requires the same access as
+                    joining it.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Messages since `since`, oldest first")
+    @ApiResponse(responseCode = "402", description = "Host not unlocked",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "No such broadcast",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/live/{sessionId}/chat")
+    public ChatFeedResponse chatMessages(
+            @PathVariable UUID sessionId,
+            @AuthenticationPrincipal AuthUser principal,
+            @Parameter(description = "The `until` from the last response. Omit on first call.")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant since) {
+        return liveChatService.feed(sessionId, AuthUser.userOrNull(principal), since);
     }
 
     // -------------------------------------------------- gifts, after the fact
