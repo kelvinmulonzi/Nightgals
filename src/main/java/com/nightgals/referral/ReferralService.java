@@ -10,6 +10,7 @@ import com.nightgals.config.MonetizationProperties;
 import com.nightgals.config.NotificationProperties;
 import com.nightgals.mail.EmailService;
 import com.nightgals.referral.dto.ReferralSummaryResponse;
+import com.nightgals.user.AccountType;
 import com.nightgals.user.User;
 import com.nightgals.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -92,7 +93,9 @@ public class ReferralService {
         // detached principal from the auth filter, whose lazy associations have
         // no session behind them.
         User buyer = userRepository.findById(purchase.getUser().getId()).orElse(null);
-        if (buyer == null) {
+        // Referrals are for bringing in creators. The package endpoint does not
+        // itself insist on one, so a viewer buying a package directly must not pay.
+        if (buyer == null || !buyer.isCreator()) {
             return;
         }
         User referrer = userRepository.findReferrerOf(buyer.getId()).orElse(null);
@@ -148,7 +151,8 @@ public class ReferralService {
         return new ReferralSummaryResponse(
                 user.getReferralCode(),
                 shareLink(user.getReferralCode()),
-                userRepository.countByReferredById(user.getId()),
+                // Only creators count: they are who the programme pays for.
+                userRepository.countByReferredByIdAndAccountType(user.getId(), AccountType.CREATOR),
                 // Only conversions earned anything, so the two numbers are shown
                 // separately rather than one flattering total.
                 creditRepository.countByUserIdAndReason(user.getId(), CreditReason.REFERRAL_BONUS),

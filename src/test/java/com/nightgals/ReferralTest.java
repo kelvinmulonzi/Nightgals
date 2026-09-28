@@ -6,6 +6,7 @@ import com.nightgals.billing.BillingService;
 import com.nightgals.referral.CreditService;
 import com.nightgals.referral.ReferralService;
 import com.nightgals.user.AccountType;
+import com.nightgals.user.AccountUpgradeService;
 import com.nightgals.user.User;
 import com.nightgals.user.UserRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -39,6 +40,7 @@ class ReferralTest {
     @Autowired ReferralService referralService;
     @Autowired CreditService creditService;
     @Autowired UserRepository userRepository;
+    @Autowired AccountUpgradeService accountUpgradeService;
 
     @Test
     @DisplayName("Every account gets a code, and it is shareable as a link")
@@ -122,6 +124,31 @@ class ReferralTest {
         assertThat(creditService.balanceOf(referrer.getId())).isZero();
     }
 
+    @Test
+    @DisplayName("Only creators count as invited; a viewer counts once they become one")
+    void onlyCreatorsCount() {
+        User referrer = register(null);
+        register(referrer.getReferralCode());
+        User viewer = register(referrer.getReferralCode(), AccountType.VIEWER);
+
+        assertThat(referralService.summaryFor(reload(referrer)).invited()).isEqualTo(1);
+
+        accountUpgradeService.becomeCreator(reload(viewer));
+
+        assertThat(referralService.summaryFor(reload(referrer)).invited()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("A viewer buying a package directly earns the referrer nothing")
+    void viewerPackageEarnsNothing() {
+        User referrer = register(null);
+        User viewer = register(referrer.getReferralCode(), AccountType.VIEWER);
+
+        buyPackage(viewer);
+
+        assertThat(creditService.balanceOf(referrer.getId())).isZero();
+    }
+
     // ------------------------------------------------------------- helpers
 
     private void buyPackage(User creator) {
@@ -130,9 +157,13 @@ class ReferralTest {
     }
 
     private User register(String referralCode) {
+        return register(referralCode, AccountType.CREATOR);
+    }
+
+    private User register(String referralCode, AccountType type) {
         String email = "ref-" + UUID.randomUUID() + "@example.com";
         authService.register(
-                new RegisterRequest(email, "correct-horse-9", AccountType.CREATOR, referralCode), null);
+                new RegisterRequest(email, "correct-horse-9", type, referralCode), null);
         return userRepository.findByEmailIgnoreCase(email).orElseThrow();
     }
 

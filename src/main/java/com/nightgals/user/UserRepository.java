@@ -28,7 +28,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     java.util.Optional<User> findByReferralCodeIgnoreCase(String referralCode);
 
-    long countByReferredById(java.util.UUID referrerId);
+    /** Referred accounts that are creators now - a viewer who upgrades later starts counting then. */
+    long countByReferredByIdAndAccountType(java.util.UUID referrerId, AccountType accountType);
 
     /**
      * The staff console's account list: search by address or handle, optionally

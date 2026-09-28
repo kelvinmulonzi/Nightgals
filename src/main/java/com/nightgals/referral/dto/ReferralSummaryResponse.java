@@ -12,7 +12,7 @@ public record ReferralSummaryResponse(
                 example = "https://noctyvera.com/join?ref=K7RBQ2XM")
         String shareLink,
 
-        @Schema(description = "Accounts created with this code") long invited,
+        @Schema(description = "Creator accounts created with this code; viewers are not counted") long invited,
 
         @Schema(description = """
                 How many of those went on to buy a package. Only these earned
