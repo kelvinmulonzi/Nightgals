@@ -10,7 +10,6 @@ import com.nightgals.config.MonetizationProperties;
 import com.nightgals.config.NotificationProperties;
 import com.nightgals.mail.EmailService;
 import com.nightgals.referral.dto.ReferralSummaryResponse;
-import com.nightgals.user.AccountType;
 import com.nightgals.user.User;
 import com.nightgals.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -151,8 +150,8 @@ public class ReferralService {
         return new ReferralSummaryResponse(
                 user.getReferralCode(),
                 shareLink(user.getReferralCode()),
-                // Only creators count: they are who the programme pays for.
-                userRepository.countByReferredByIdAndAccountType(user.getId(), AccountType.CREATOR),
+                // Only creators who finished signing up: they are who the programme pays for.
+                userRepository.countCompletedCreatorReferrals(user.getId()),
                 // Only conversions earned anything, so the two numbers are shown
                 // separately rather than one flattering total.
                 creditRepository.countByUserIdAndReason(user.getId(), CreditReason.REFERRAL_BONUS),

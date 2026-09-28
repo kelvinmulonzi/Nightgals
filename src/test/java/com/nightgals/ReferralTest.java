@@ -3,6 +3,9 @@ package com.nightgals;
 import com.nightgals.auth.AuthService;
 import com.nightgals.auth.dto.RegisterRequest;
 import com.nightgals.billing.BillingService;
+import com.nightgals.profile.Gender;
+import com.nightgals.profile.ProfileService;
+import com.nightgals.profile.dto.ProfileRequest;
 import com.nightgals.referral.CreditService;
 import com.nightgals.referral.ReferralService;
 import com.nightgals.user.AccountType;
@@ -18,6 +21,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +45,7 @@ class ReferralTest {
     @Autowired CreditService creditService;
     @Autowired UserRepository userRepository;
     @Autowired AccountUpgradeService accountUpgradeService;
+    @Autowired ProfileService profileService;
 
     @Test
     @DisplayName("Every account gets a code, and it is shareable as a link")
@@ -58,6 +63,7 @@ class ReferralTest {
     void bonusOnFirstPurchase() {
         User referrer = register(null);
         User invited = register(referrer.getReferralCode());
+        completeProfile(invited);
 
         // Signing up earns nothing - otherwise this is a bot farm.
         assertThat(creditService.balanceOf(referrer.getId())).isZero();
@@ -128,14 +134,30 @@ class ReferralTest {
     @DisplayName("Only creators count as invited; a viewer counts once they become one")
     void onlyCreatorsCount() {
         User referrer = register(null);
-        register(referrer.getReferralCode());
+        completeProfile(register(referrer.getReferralCode()));
         User viewer = register(referrer.getReferralCode(), AccountType.VIEWER);
 
         assertThat(referralService.summaryFor(reload(referrer)).invited()).isEqualTo(1);
 
+        // Becoming a creator is not enough on its own; finishing the profile is.
         accountUpgradeService.becomeCreator(reload(viewer));
+        assertThat(referralService.summaryFor(reload(referrer)).invited()).isEqualTo(1);
 
+        completeProfile(viewer);
         assertThat(referralService.summaryFor(reload(referrer)).invited()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("A creator counts only once their profile is complete")
+    void onlyCompletedProfilesCount() {
+        User referrer = register(null);
+        User creator = register(referrer.getReferralCode());
+
+        assertThat(referralService.summaryFor(reload(referrer)).invited()).isZero();
+
+        completeProfile(creator);
+
+        assertThat(referralService.summaryFor(reload(referrer)).invited()).isEqualTo(1);
     }
 
     @Test
@@ -165,6 +187,12 @@ class ReferralTest {
         authService.register(
                 new RegisterRequest(email, "correct-horse-9", type, referralCode), null);
         return userRepository.findByEmailIgnoreCase(email).orElseThrow();
+    }
+
+    private void completeProfile(User user) {
+        profileService.createOrUpdate(reload(user), new ProfileRequest(
+                null, "Here for the weekend", LocalDate.of(1996, 5, 5),
+                Gender.FEMALE, "Douala", "Cameroon", null, null));
     }
 
     private User reload(User user) {

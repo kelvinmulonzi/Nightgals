@@ -28,8 +28,22 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     java.util.Optional<User> findByReferralCodeIgnoreCase(String referralCode);
 
-    /** Referred accounts that are creators now - a viewer who upgrades later starts counting then. */
-    long countByReferredByIdAndAccountType(java.util.UUID referrerId, AccountType accountType);
+    /**
+     * Referred creators who have finished signing up: a creator account whose
+     * profile has a date of birth and a gender - the same test that takes
+     * onboarding to DONE ({@code ProfileRepository.isCompleteForUser}). Goes by
+     * the current account type, so a viewer who upgrades counts once done.
+     */
+    @Query("""
+            SELECT COUNT(u) FROM User u
+            WHERE u.referredBy.id = :referrerId
+              AND u.accountType = com.nightgals.user.AccountType.CREATOR
+              AND EXISTS (SELECT p FROM Profile p
+                          WHERE p.user = u
+                            AND p.dateOfBirth IS NOT NULL
+                            AND p.gender IS NOT NULL)
+            """)
+    long countCompletedCreatorReferrals(@Param("referrerId") UUID referrerId);
 
     /**
      * The staff console's account list: search by address or handle, optionally
