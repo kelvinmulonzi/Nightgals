@@ -21,8 +21,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>Without this there is no way to approve anybody: approving requires a
  * MODERATOR or ADMIN, and nothing in the API grants those roles to a fresh
- * account. Runs once - if the account already exists it is left untouched, so
- * changing the password later is safe.
+ * account. Runs on every boot and is idempotent: an account that already holds
+ * the configured address keeps its password and its handle, and is only
+ * promoted if it is not an administrator yet.
  *
  * <p>Two things here exist because this runner once took production down for
  * thirteen hours. It used to hard-code the handle {@code NightgalsTeam} while
@@ -86,7 +87,24 @@ public class AdminBootstrap implements ApplicationRunner {
     }
 
     private void seed() {
-        if (userRepository.existsByEmailIgnoreCase(adminEmail)) {
+        // Already here as somebody's ordinary account. Promote it rather than
+        // walking away: the configured address is a statement that this person
+        // administers the platform, and an account that signed up through the
+        // front door first should not quietly stay a normal user forever.
+        //
+        // Narrow on purpose - only the one address configured as the bootstrap
+        // admin, and only ever upwards. Nothing here demotes anybody, so this
+        // cannot take the last administrator away.
+        var existing = userRepository.findByEmailIgnoreCase(adminEmail);
+        if (existing.isPresent()) {
+            User account = existing.get();
+            if (account.getRole() != Role.ADMIN) {
+                Role had = account.getRole();
+                account.setRole(Role.ADMIN);
+                userRepository.save(account);
+                log.info("Promoted {} from {} to ADMIN (bootstrap admin address)",
+                        adminEmail, had);
+            }
             return;
         }
         if (adminPassword == null || adminPassword.isBlank()) {

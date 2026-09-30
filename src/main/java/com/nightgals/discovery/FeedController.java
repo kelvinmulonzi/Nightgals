@@ -96,10 +96,20 @@ public class FeedController {
                     approved and almost nobody is verified.
                     """)
             @RequestParam(required = false) Boolean verifiedOnly,
+            @Parameter(description = """
+                    Shuffles the feed. Any short string; the same one returns the same
+                    order, a different one deals again.
+
+                    Make one per page load and send it with every page. Cards are ordered
+                    by package rank first and shuffled inside each rank, so paid placement
+                    is unaffected - but without a stable seed, page two would be dealt from
+                    a different shuffle and repeat cards already on screen.
+                    """, example = "k3f9a1")
+            @RequestParam(required = false) @Size(max = 64) String seed,
             @PageableDefault(size = 20) Pageable pageable) {
         return feedService.feed(AuthUser.userOrNull(principal), q, city,
                 gender == null ? null : gender.name(),
-                minAge, maxAge, liveOnly, tier, verifiedOnly, pageable);
+                minAge, maxAge, liveOnly, tier, verifiedOnly, seed, pageable);
     }
 
     @Operation(

@@ -65,7 +65,7 @@ public class FeedService {
     public PageResponse<MemberCardResponse> feed(User viewer, String q, String city, String gender,
                                                  Integer minAge, Integer maxAge,
                                                  Boolean liveOnly, String tier, Boolean verifiedOnly,
-                                                 Pageable pageable) {
+                                                 String seed, Pageable pageable) {
         // Swapped rather than rejected: someone dragging a range slider past
         // itself means the range, not an error page.
         if (minAge != null && maxAge != null && minAge > maxAge) {
@@ -94,6 +94,7 @@ public class FeedService {
                 // A creator who has neither a trial nor a package is not on the
                 // site, however she is searched for.
                 packageService.visibilityEnforced(),
+                shuffleSeed(seed),
                 pageable);
 
         List<UUID> userIds = page.getContent().stream().map(p -> p.getUser().getId()).toList();
@@ -293,6 +294,29 @@ public class FeedService {
      * A search box that was typed in and then cleared arrives as "", which is
      * not the same request as "no filter" unless we say so here.
      */
+    /**
+     * The seed the feed is shuffled by.
+     *
+     * <p>Normally the client's: it makes one per page load and sends it with
+     * every page, so "load more" continues the same order instead of dealing a
+     * fresh hand and repeating cards already on screen.
+     *
+     * <p>When a client sends none - an older bundle still in somebody's cache -
+     * this falls back to the current minute. Not a constant, because then those
+     * clients would see one fixed order forever, which is the thing being fixed;
+     * and not the exact clock, because a stable value within a minute keeps
+     * paging coherent for them too.
+     */
+    private static String shuffleSeed(String supplied) {
+        if (supplied != null && !supplied.isBlank()) {
+            // Trimmed and capped: it only ever gets concatenated into a hash, and
+            // there is no reason to carry an unbounded string into the database.
+            String trimmed = supplied.trim();
+            return trimmed.length() > 64 ? trimmed.substring(0, 64) : trimmed;
+        }
+        return String.valueOf(java.time.Instant.now().getEpochSecond() / 60);
+    }
+
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }

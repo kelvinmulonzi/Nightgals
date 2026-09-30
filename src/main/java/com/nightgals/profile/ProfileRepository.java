@@ -47,8 +47,16 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
      * one line of SQL to close.
      *
      * <p>Ordered by <b>package rank first</b> - Black Diamond above Diamond above
-     * Pro above everyone else - and only then by recency. That is what "highest
-     * priority in search results and homepage listings" buys.
+     * Pro above everyone else - and only then <b>shuffled</b>. That is what
+     * "highest priority in search results and homepage listings" buys: the rank
+     * is never traded away, only the order inside it.
+     *
+     * <p>It used to be recency inside each rank, which meant the same handful of
+     * newest creators owned the top of the page permanently and everyone else
+     * was effectively unlisted. The shuffle is {@code MD5(user_id || seed)}: a
+     * total order, so paging cannot repeat or skip a card, and a different one
+     * for every seed. The caller supplies the seed and holds it for the session,
+     * so scrolling stays coherent and a refresh deals again.
      *
      * <p>Native because the rank is a scalar subquery in ORDER BY, which JPQL
      * cannot express portably. The subquery takes MAX so a creator holding two
@@ -136,7 +144,7 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
                   AND cp.cancelled_at IS NULL
                   AND cp.starts_at <= NOW()
                   AND cp.expires_at > NOW()
-            ), 0) DESC, p.created_at DESC
+            ), 0) DESC, MD5(p.user_id::text || CAST(:seed AS TEXT))
             """,
             countQuery = """
             SELECT COUNT(*) FROM profiles p
@@ -189,6 +197,7 @@ public interface ProfileRepository extends JpaRepository<Profile, UUID> {
                            @Param("tier") String tier,
                            @Param("verifiedOnly") Boolean verifiedOnly,
                            @Param("paidOnly") boolean paidOnly,
+                           @Param("seed") String seed,
                            Pageable pageable);
 
     /**

@@ -263,7 +263,8 @@ class CreatorPackageTest {
         // empty database and every assertion below passes for the wrong reason.
         userRepository.flush();
         return feedService.feed(null, null, null, null, null, null, null,
-                tier, verifiedOnly, org.springframework.data.domain.PageRequest.of(0, 100)).content();
+                tier, verifiedOnly, null,
+                org.springframework.data.domain.PageRequest.of(0, 100)).content();
     }
 
     private java.util.List<java.util.UUID> idsIn(

@@ -200,7 +200,7 @@ class UnpaidCreatorHiddenTest {
     private List<UUID> feedIds() {
         // The feed is native SQL, which Hibernate does not auto-flush for.
         entityManager.flush();
-        return feedService.feed(null, null, null, null, null, null, null, null, null,
+        return feedService.feed(null, null, null, null, null, null, null, null, null,null,
                         PageRequest.of(0, 100)).content().stream()
                 .map(com.nightgals.discovery.dto.MemberCardResponse::userId)
                 .toList();
