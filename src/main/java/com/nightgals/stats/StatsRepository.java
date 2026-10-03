@@ -315,4 +315,115 @@ public interface StatsRepository extends Repository<Purchase, UUID> {
             """, nativeQuery = true)
     long completedSalesFor(@org.springframework.data.repository.query.Param("creatorId") java.util.UUID creatorId,
                            @org.springframework.data.repository.query.Param("from") java.time.LocalDate from);
+
+    /**
+     * Referred sign-ups per day, and how many of them count.
+     *
+     * <p>"Counted" repeats the rule on a referrer's own page
+     * ({@code UserRepository.countCompletedCreatorReferrals}): a creator whose
+     * profile has a date of birth and a gender. It is read as of now, not as of
+     * the sign-up day - an account that finishes its profile next week moves
+     * into the counted column for the day it joined.
+     */
+    @Query(value = """
+            SELECT CAST(u.created_at AS date) AS "date",
+                   COUNT(*)                   AS "signups",
+                   COUNT(*) FILTER (WHERE u.account_type = 'CREATOR' AND EXISTS (
+                       SELECT 1 FROM profiles p WHERE p.user_id = u.id
+                         AND p.date_of_birth IS NOT NULL AND p.gender IS NOT NULL)) AS "counted"
+            FROM users u
+            WHERE u.referred_by IS NOT NULL
+              AND u.created_at >= :from AND u.created_at < :to
+            GROUP BY 1
+            ORDER BY 1
+            """, nativeQuery = true)
+    List<DailyReferralRow> dailyReferrals(@Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * One row per referrer: what their code brought in during the window, and
+     * what it has brought in over all time.
+     *
+     * <p>Everybody who has ever referred an account appears, including those
+     * with nothing in the window - a referrer who has gone quiet is exactly what
+     * this page is for, and dropping them would hide it.
+     *
+     * <p>Bonuses are dated by when they were paid, not by when the referred
+     * account joined: somebody invited in March who buys in May is May's payout.
+     */
+    @Query(value = """
+            WITH referred AS (
+                SELECT u.referred_by AS referrer_id,
+                       u.created_at,
+                       u.account_type,
+                       (u.created_at >= :from AND u.created_at < :to) AS in_window,
+                       EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = u.id
+                                 AND p.date_of_birth IS NOT NULL AND p.gender IS NOT NULL) AS complete
+                FROM users u
+                WHERE u.referred_by IS NOT NULL
+            ),
+            bonuses AS (
+                SELECT c.user_id AS referrer_id, COUNT(*) AS converted, SUM(c.amount_minor) AS paid
+                FROM credit_entries c
+                WHERE c.reason = 'REFERRAL_BONUS'
+                  AND c.created_at >= :from AND c.created_at < :to
+                GROUP BY c.user_id
+            )
+            SELECT CAST(r.id AS varchar)  AS "userId",
+                   r.username             AS "username",
+                   r.email                AS "email",
+                   r.referral_code        AS "code",
+                   COUNT(*) FILTER (WHERE d.in_window)                                                   AS "signups",
+                   COUNT(*) FILTER (WHERE d.in_window AND d.account_type = 'CREATOR' AND d.complete)     AS "counted",
+                   COUNT(*) FILTER (WHERE d.in_window AND d.account_type = 'CREATOR' AND NOT d.complete) AS "pending",
+                   COUNT(*) FILTER (WHERE d.in_window AND d.account_type <> 'CREATOR')                   AS "viewers",
+                   COUNT(*) FILTER (WHERE d.account_type = 'CREATOR' AND d.complete)                     AS "allTimeCounted",
+                   CAST(EXTRACT(EPOCH FROM MAX(d.created_at)) AS bigint)                                 AS "lastSignupEpoch",
+                   COALESCE(MAX(b.converted), 0)                                                         AS "converted",
+                   COALESCE(MAX(b.paid), 0)                                                              AS "creditPaidMinor"
+            FROM referred d
+            JOIN users r ON r.id = d.referrer_id
+            LEFT JOIN bonuses b ON b.referrer_id = r.id
+            GROUP BY r.id, r.username, r.email, r.referral_code
+            ORDER BY "counted" DESC, "signups" DESC, "allTimeCounted" DESC, r.username
+            """, nativeQuery = true)
+    List<ReferrerRow> referrerBoard(@Param("from") Instant from, @Param("to") Instant to);
+
+    interface DailyReferralRow {
+        LocalDate getDate();
+
+        long getSignups();
+
+        long getCounted();
+    }
+
+    /**
+     * One referrer. The id and the timestamp come back as plain text and epoch
+     * seconds so the projection does not depend on how the driver happens to
+     * hand back a uuid or a timestamptz from a native query.
+     */
+    interface ReferrerRow {
+        String getUserId();
+
+        String getUsername();
+
+        String getEmail();
+
+        String getCode();
+
+        long getSignups();
+
+        long getCounted();
+
+        long getPending();
+
+        long getViewers();
+
+        long getAllTimeCounted();
+
+        long getLastSignupEpoch();
+
+        long getConverted();
+
+        long getCreditPaidMinor();
+    }
 }

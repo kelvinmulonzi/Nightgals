@@ -2,6 +2,7 @@ package com.nightgals.stats;
 
 import com.nightgals.stats.dto.GrowthResponse;
 import com.nightgals.stats.dto.PaymentHealthResponse;
+import com.nightgals.stats.dto.ReferralStatsResponse;
 import com.nightgals.stats.dto.RevenueResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -54,6 +55,7 @@ public class StatsService {
     private final StatsRepository repository;
     private final com.nightgals.views.ContentViewRepository viewRepository;
     private final com.nightgals.profile.ProfileRepository profileRepository;
+    private final com.nightgals.config.MonetizationProperties monetization;
 
 
     /**
@@ -115,6 +117,65 @@ public class StatsService {
         }
 
         return new AudienceResponse(from, to, total, points, top);
+    }
+
+    /**
+     * Referral sign-ups over the window, and every referrer's results.
+     *
+     * <p>The headline totals are the sum of the leaderboard rather than a query
+     * of their own, so the tiles and the table underneath cannot disagree.
+     *
+     * @param days how many days back to reach, clamped to 1..{@value #MAX_DAYS}
+     */
+    @Transactional(readOnly = true)
+    public ReferralStatsResponse referrals(int days) {
+        int span = Math.clamp(days, 1, MAX_DAYS);
+        LocalDate to = LocalDate.now(ZoneOffset.UTC);
+        LocalDate from = to.minusDays(span - 1L);
+        Instant fromInstant = from.atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant toInstant = to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+
+        Map<LocalDate, long[]> byDay = new TreeMap<>();
+        for (StatsRepository.DailyReferralRow row : repository.dailyReferrals(fromInstant, toInstant)) {
+            byDay.put(row.getDate(), new long[] {row.getSignups(), row.getCounted()});
+        }
+        List<ReferralStatsResponse.DailyPoint> points = new ArrayList<>();
+        for (LocalDate day = from; !day.isAfter(to); day = day.plusDays(1)) {
+            long[] slot = byDay.getOrDefault(day, EMPTY_DAY);
+            points.add(new ReferralStatsResponse.DailyPoint(day, slot[0], slot[1]));
+        }
+
+        List<ReferralStatsResponse.Referrer> referrers = new ArrayList<>();
+        long signups = 0;
+        long counted = 0;
+        long pending = 0;
+        long viewers = 0;
+        long converted = 0;
+        long paid = 0;
+        for (StatsRepository.ReferrerRow row : repository.referrerBoard(fromInstant, toInstant)) {
+            referrers.add(new ReferralStatsResponse.Referrer(
+                    UUID.fromString(row.getUserId()),
+                    row.getUsername(),
+                    row.getEmail(),
+                    row.getCode(),
+                    row.getSignups(),
+                    row.getCounted(),
+                    row.getPending(),
+                    row.getViewers(),
+                    row.getConverted(),
+                    row.getCreditPaidMinor(),
+                    row.getAllTimeCounted(),
+                    Instant.ofEpochSecond(row.getLastSignupEpoch())));
+            signups += row.getSignups();
+            counted += row.getCounted();
+            pending += row.getPending();
+            viewers += row.getViewers();
+            converted += row.getConverted();
+            paid += row.getCreditPaidMinor();
+        }
+
+        return new ReferralStatsResponse(from, to, signups, counted, pending, viewers, converted, paid,
+                monetization.currency(), points, referrers);
     }
 
     /**

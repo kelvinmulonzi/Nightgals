@@ -4,6 +4,7 @@ import com.nightgals.common.ErrorResponse;
 import com.nightgals.stats.dto.AudienceResponse;
 import com.nightgals.stats.dto.GrowthResponse;
 import com.nightgals.stats.dto.PaymentHealthResponse;
+import com.nightgals.stats.dto.ReferralStatsResponse;
 import com.nightgals.stats.dto.RevenueResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -138,5 +139,30 @@ public class StatsAdminController {
             @Parameter(description = "How many days back to reach, 1..365") 
             @RequestParam(defaultValue = "30") int days) {
         return statsService.audience(days);
+    }
+
+    @Operation(
+            summary = "Referral sign-ups, and who brought them",
+            description = """
+                    How many accounts arrived through a referral link in the window, how
+                    many of them count, and a leaderboard of every referrer.
+
+                    "Counted" is the same figure a referrer sees on their own page: a
+                    referred creator whose profile is complete. Sign-ups that have not got
+                    that far are shown beside it as pending, and viewers separately, since
+                    they never count.
+
+                    Sign-ups are dated by when the account was created; bonuses by when
+                    they were paid. Each referrer also carries an all-time counted figure,
+                    which is what to compare against their own referrals page.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Totals, a daily series and the referrer leaderboard")
+    @ApiResponse(responseCode = "403", description = "Caller is not an admin",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    @GetMapping("/referrals")
+    public ReferralStatsResponse referrals(
+            @Parameter(description = "How many days back to reach, including today. Clamped to 1-365.")
+            @RequestParam(defaultValue = "30") int days) {
+        return statsService.referrals(days);
     }
 }
