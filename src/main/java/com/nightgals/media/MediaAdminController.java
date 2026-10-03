@@ -83,6 +83,27 @@ public class MediaAdminController {
     }
 
     @Operation(
+            summary = "Everybody who has posted, with their totals",
+            description = """
+                    One row per member with at least one post: how many posts, how many of
+                    them photos and videos, how many already taken down, total views, and
+                    when they last posted. Most recently active first.
+
+                    This is the first screen of the moderation listing. Members who have
+                    never posted are left out - there is nothing of theirs to moderate.
+                    Open a row with `GET /by-user/{userId}` to see the posts themselves.
+                    """)
+    @ApiResponse(responseCode = "200", description = "A page of posters")
+    @GetMapping("/posters")
+    public PageResponse<com.nightgals.media.dto.PosterResponse> posters(
+            @Parameter(description = "Part of an email address or handle") @RequestParam(required = false) String q,
+            @Parameter(description = "Only people with something already taken down")
+            @RequestParam(defaultValue = "false") boolean takenDownOnly,
+            @PageableDefault(size = 25) Pageable pageable) {
+        return mediaService.posters(q, takenDownOnly, pageable);
+    }
+
+    @Operation(
             summary = "Everything one creator has posted",
             description = """
                     Her whole gallery as staff see it — taken-down items included, with the

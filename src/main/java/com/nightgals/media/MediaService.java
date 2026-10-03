@@ -112,6 +112,39 @@ public class MediaService {
         return MediaResponse.of(mediaRepository.save(asset));
     }
 
+    /**
+     * Everybody who has posted, with their totals - the moderation listing.
+     *
+     * @param q             part of a handle or an email address; blank for everybody
+     * @param takenDownOnly true to keep only people with something already taken down
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<com.nightgals.media.dto.PosterResponse> posters(String q, boolean takenDownOnly,
+                                                                         Pageable pageable) {
+        // The query carries its own ordering, so the caller's sort is dropped
+        // rather than appended to native SQL it was not written for.
+        Pageable unsorted = org.springframework.data.domain.PageRequest.of(
+                pageable.getPageNumber(), pageable.getPageSize());
+        String term = q == null ? "" : q.trim();
+        return PageResponse.from(mediaRepository.posters(term, takenDownOnly, unsorted),
+                row -> new com.nightgals.media.dto.PosterResponse(
+                        UUID.fromString(row.getUserId()),
+                        row.getUsername(),
+                        row.getEmail(),
+                        row.getDisplayName(),
+                        row.getCity(),
+                        row.getAccountType(),
+                        row.getSuspended(),
+                        row.getPosts(),
+                        row.getPhotos(),
+                        row.getVideos(),
+                        row.getTakenDown(),
+                        row.getViews(),
+                        java.time.Instant.ofEpochSecond(row.getLastPostEpoch()),
+                        row.getThumbnailId() == null
+                                ? null : "/api/v1/media/" + row.getThumbnailId() + "/file"));
+    }
+
     @Transactional(readOnly = true)
     public List<MediaResponse> listOwn(UUID userId) {
         return mediaRepository.findByUserIdOrderByPositionAscCreatedAtAsc(userId).stream()

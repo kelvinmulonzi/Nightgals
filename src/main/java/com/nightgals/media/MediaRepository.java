@@ -15,6 +15,90 @@ public interface MediaRepository extends JpaRepository<MediaAsset, UUID> {
     List<MediaAsset> findByUserIdOrderByPositionAscCreatedAtAsc(UUID userId);
 
     /**
+     * Everybody who has posted anything, with their totals, most recent first.
+     *
+     * <p>The moderation listing's first screen. It starts from media rather than
+     * from accounts, so a member who has never posted does not appear - most
+     * accounts have nothing to moderate, and listing them all buried the ones
+     * that do.
+     *
+     * <p>Taken-down items count towards {@code posts}: this is the staff view,
+     * and what was removed is part of what somebody has posted. The thumbnail
+     * skips them, though, and skips videos - it is drawn as an image.
+     *
+     * <p>{@code q} is passed as an empty string rather than null when there is
+     * no search, because Postgres cannot infer the type of a bare null parameter.
+     */
+    @Query(value = """
+            SELECT CAST(u.id AS varchar)                                  AS "userId",
+                   u.username                                             AS "username",
+                   u.email                                                AS "email",
+                   p.display_name                                         AS "displayName",
+                   p.city                                                 AS "city",
+                   u.account_type                                         AS "accountType",
+                   (u.status = 'SUSPENDED')                               AS "suspended",
+                   COUNT(*)                                               AS "posts",
+                   COUNT(*) FILTER (WHERE m.type = 'PHOTO')               AS "photos",
+                   COUNT(*) FILTER (WHERE m.type = 'VIDEO')               AS "videos",
+                   COUNT(*) FILTER (WHERE m.status = 'REJECTED')          AS "takenDown",
+                   COALESCE(SUM(m.view_count), 0)                         AS "views",
+                   CAST(EXTRACT(EPOCH FROM MAX(m.created_at)) AS bigint)  AS "lastPostEpoch",
+                   CAST((ARRAY_AGG(m.id ORDER BY m.is_primary DESC, m.created_at DESC)
+                         FILTER (WHERE m.type = 'PHOTO' AND m.status <> 'REJECTED'))[1] AS varchar)
+                                                                          AS "thumbnailId"
+            FROM media_assets m
+            JOIN users u ON u.id = m.user_id
+            LEFT JOIN profiles p ON p.user_id = u.id
+            WHERE (:q = '' OR u.username ILIKE '%' || :q || '%' OR u.email ILIKE '%' || :q || '%')
+            GROUP BY u.id, u.username, u.email, u.account_type, u.status, p.display_name, p.city
+            HAVING (:takenDownOnly = FALSE OR COUNT(*) FILTER (WHERE m.status = 'REJECTED') > 0)
+            ORDER BY MAX(m.created_at) DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM (
+                SELECT u.id
+                FROM media_assets m
+                JOIN users u ON u.id = m.user_id
+                WHERE (:q = '' OR u.username ILIKE '%' || :q || '%' OR u.email ILIKE '%' || :q || '%')
+                GROUP BY u.id
+                HAVING (:takenDownOnly = FALSE OR COUNT(*) FILTER (WHERE m.status = 'REJECTED') > 0)
+            ) posters
+            """,
+            nativeQuery = true)
+    Page<PosterRow> posters(@Param("q") String q, @Param("takenDownOnly") boolean takenDownOnly, Pageable pageable);
+
+    /** One poster. Ids and the timestamp come back as text and epoch seconds, independent of the driver. */
+    interface PosterRow {
+        String getUserId();
+
+        String getUsername();
+
+        String getEmail();
+
+        String getDisplayName();
+
+        String getCity();
+
+        String getAccountType();
+
+        boolean getSuspended();
+
+        long getPosts();
+
+        long getPhotos();
+
+        long getVideos();
+
+        long getTakenDown();
+
+        long getViews();
+
+        long getLastPostEpoch();
+
+        String getThumbnailId();
+    }
+
+    /**
      * The photo this member chose to lead with.
      *
      * <p>Filtered on status too: an item pulled by a moderator must stop being
